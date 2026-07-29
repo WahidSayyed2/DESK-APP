@@ -29,9 +29,14 @@ Stack: **Next.js** (app) + **Supabase** (auth + database + realtime) + **Vercel*
 
 ## 2. Get an Anthropic API key (~1 min)
 
-Go to https://console.anthropic.com → **API Keys → Create key**. This powers the
-voice-to-task AI and the AI portal. It's billed separately from your Claude.ai
-subscription (pay-as-you-go, based on usage).
+Go to https://console.anthropic.com → **API Keys → Create key**. This powers
+**only the AI Portal** (a chat assistant for drafting, planning, and
+answering questions) — billed separately from your Claude.ai subscription,
+pay-as-you-go based on usage.
+
+Note: task capture (typing or speaking to create a task) does **not** use AI.
+What the Director types or speaks becomes the task directly and instantly —
+AI is only involved when someone opens the AI Portal to ask it something.
 
 ## 3. Run it locally first (optional but recommended)
 
@@ -59,8 +64,10 @@ Open http://localhost:3000, sign in with the Director or EA account you created.
   protected by row-level security (see `supabase/schema.sql`).
 - **Live sync**: Supabase Realtime — the moment one desk changes something, the
   other desk updates within a second, no refresh needed.
-- **AI**: two server-side API routes (`/api/parse-task`, `/api/ai-chat`) call
-  Claude using your `ANTHROPIC_API_KEY`. The key never reaches the browser.
+- **AI**: one server-side API route (`/api/ai-chat`) calls Claude using your
+  `ANTHROPIC_API_KEY` for the AI Portal only. The key never reaches the browser.
+- **Task capture**: no AI involved — what's typed or spoken becomes the task
+  directly and instantly.
 - **Voice capture**: the browser's built-in Speech Recognition (Chrome only, no
   extra service needed).
 

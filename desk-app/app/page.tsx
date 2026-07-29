@@ -296,7 +296,7 @@ function Overview({ tasks, updates, setTab }: any) {
         </div>
         <div className="glass card-block">
           <h3>Quick capture</h3>
-          <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Type or speak — it becomes a task automatically.</p>
+          <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Type or speak — it becomes a task instantly, no AI in between.</p>
           <button className="acid-btn" style={{ width: '100%' }} onClick={() => setTab('newtask')}>Open capture tool →</button>
         </div>
       </div>
@@ -305,13 +305,14 @@ function Overview({ tasks, updates, setTab }: any) {
 }
 
 // =========================================================
-// New task capture (voice + AI)
+// New task capture (voice/text -> task, direct, no AI)
 // =========================================================
 function NewTask({ toast, reload }: any) {
   const [text, setText] = useState('');
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [dueDate, setDueDate] = useState('');
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState<any>(null);
   const recRef = useRef<any>(null);
 
   useEffect(() => {
@@ -336,29 +337,28 @@ function NewTask({ toast, reload }: any) {
     else { recRef.current.start(); setListening(true); }
   }
 
-  async function parse() {
-    if (!text.trim()) { toast('Type or speak something first.'); return; }
-    if (listening) { recRef.current.stop(); setListening(false); }
-    setBusy(true);
-    try {
-      const resp = await fetch('/api/parse-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      setPreview(data);
-    } catch (e) {
-      toast('Could not reach the AI just now. Try again.');
-    }
-    setBusy(false);
+  function deriveTitle(raw: string) {
+    const clean = raw.trim().replace(/\s+/g, ' ');
+    const words = clean.split(' ');
+    return words.length > 10 ? words.slice(0, 10).join(' ') + '…' : clean;
   }
 
-  async function send() {
+  async function createTask() {
+    if (!text.trim()) { toast('Type or speak the instruction first.'); return; }
+    if (listening) { recRef.current.stop(); setListening(false); }
+    setBusy(true);
     const { data: userData } = await supabase.auth.getUser();
     const { error } = await supabase.from('tasks').insert({
-      title: preview.title, description: preview.description, priority: preview.priority,
-      due_date: preview.dueDate || null, status: 'new', created_by: userData.user?.id,
+      title: deriveTitle(text),
+      description: text.trim(),
+      priority,
+      due_date: dueDate || null,
+      status: 'new',
+      created_by: userData.user?.id,
     });
+    setBusy(false);
     if (error) { toast('Could not save task: ' + error.message); return; }
-    setText(''); setPreview(null);
+    setText(''); setPriority('medium'); setDueDate('');
     toast('Task sent to the EA.');
     reload.loadTasks();
   }
@@ -367,37 +367,27 @@ function NewTask({ toast, reload }: any) {
     <>
       <div className="eyebrow">Capture</div>
       <h2>Turn a thought into a task.</h2>
-      <p className="sub">Type it or speak it — AI structures it and sends it straight to the EA.</p>
+      <p className="sub">Type it or speak it — it goes straight to the EA, instantly.</p>
       <div className="glass hero">
         <div className="capture">
           <button className={'mic-btn' + (listening ? ' live' : '')} onClick={toggleMic} title="Speak">🎙️</button>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Remind the EA to prep the board deck by Friday, high priority, and confirm the venue for the offsite..." />
-          <button className="acid-btn" disabled={busy} onClick={parse}>{busy ? 'Thinking…' : 'Convert →'}</button>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Prep the board deck by Friday, high priority, and confirm the venue for the offsite..." />
+          <button className="acid-btn" disabled={busy} onClick={createTask}>{busy ? 'Sending…' : 'Create task →'}</button>
         </div>
         {listening && <div style={{ fontSize: 11, color: '#8f9ba7', marginTop: 10 }}>Listening…</div>}
-      </div>
-      {preview && (
-        <div className="paper card-block" style={{ marginTop: 18 }}>
-          <h3>Review before sending</h3>
-          <label className="field-label">Title</label>
-          <input className="input" value={preview.title} onChange={(e) => setPreview({ ...preview, title: e.target.value })} style={{ marginBottom: 12 }} />
-          <label className="field-label">Description</label>
-          <textarea className="textarea" value={preview.description} onChange={(e) => setPreview({ ...preview, description: e.target.value })} style={{ marginBottom: 12, minHeight: 70 }} />
-          <div className="form-grid" style={{ marginBottom: 16 }}>
-            <div>
-              <label className="field-label">Priority</label>
-              <select className="select" value={preview.priority} onChange={(e) => setPreview({ ...preview, priority: e.target.value })}>
-                <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-              </select>
-            </div>
-            <div>
-              <label className="field-label">Due date</label>
-              <input className="input" type="date" value={preview.dueDate || ''} onChange={(e) => setPreview({ ...preview, dueDate: e.target.value })} />
-            </div>
+        <div className="form-grid" style={{ marginTop: 16, maxWidth: 460 }}>
+          <div>
+            <label className="field-label">Priority</label>
+            <select className="select" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+            </select>
           </div>
-          <button className="dark-btn" onClick={send}>Send to EA →</button>
+          <div>
+            <label className="field-label">Due date (optional)</label>
+            <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
         </div>
-      )}
+      </div>
     </>
   );
 }
