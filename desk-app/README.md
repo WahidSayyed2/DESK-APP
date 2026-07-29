@@ -27,12 +27,12 @@ Stack: **Next.js** (app) + **Supabase** (auth + database + realtime) + **Vercel*
    - **Project URL** → this is `NEXT_PUBLIC_SUPABASE_URL`
    - **anon public** key → this is `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-## 2. Get an Anthropic API key (~1 min)
+## 2. Get a Google Gemini API key — free (~1 min)
 
-Go to https://console.anthropic.com → **API Keys → Create key**. This powers
-**only the AI Portal** (a chat assistant for drafting, planning, and
-answering questions) — billed separately from your Claude.ai subscription,
-pay-as-you-go based on usage.
+Go to https://aistudio.google.com/apikey → **Create API key**. No credit card
+required. This powers **only the AI Portal** (a chat assistant for drafting,
+planning, and answering questions) and stays within Gemini's free tier for
+normal use.
 
 Note: task capture (typing or speaking to create a task) does **not** use AI.
 What the Director types or speaks becomes the task directly and instantly —
@@ -53,7 +53,7 @@ Open http://localhost:3000, sign in with the Director or EA account you created.
 1. Push this project to a GitHub repo (Vercel deploys from GitHub).
 2. Go to https://vercel.com → **Add New → Project** → import that repo.
 3. In **Environment Variables**, add the same 3 keys from `.env.example`
-   (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `ANTHROPIC_API_KEY`).
+   (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GEMINI_API_KEY`).
 4. Click **Deploy**. You'll get a live URL (e.g. `the-desk.vercel.app`) — that's
    the real, permanent link for both the Director and the EA.
 
@@ -65,7 +65,7 @@ Open http://localhost:3000, sign in with the Director or EA account you created.
 - **Live sync**: Supabase Realtime — the moment one desk changes something, the
   other desk updates within a second, no refresh needed.
 - **AI**: one server-side API route (`/api/ai-chat`) calls Claude using your
-  `ANTHROPIC_API_KEY` for the AI Portal only. The key never reaches the browser.
+  `GEMINI_API_KEY` for the AI Portal only. The key never reaches the browser.
 - **Task capture**: no AI involved — what's typed or spoken becomes the task
   directly and instantly.
 - **Voice capture**: the browser's built-in Speech Recognition (Chrome only, no
