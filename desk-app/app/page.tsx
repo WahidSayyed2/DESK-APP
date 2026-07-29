@@ -43,7 +43,10 @@ export default function Home() {
   const prevUpdateCount = useRef<number | null>(null);
   const prevChatCount = useRef<number | null>(null);
   const initialTabSet = useRef(false);
+  const tabRef = useRef<Tab>('overview');
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
+
+  useEffect(() => { tabRef.current = tab; }, [tab]);
 
   function toast(text: string) {
     const id = ++toastId.current;
@@ -56,13 +59,29 @@ export default function Home() {
     toast(title);
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission === 'granted') {
-      try { new Notification(title, { body, icon: undefined }); } catch {}
+      try { new Notification(title, { body }); }
+      catch (e) { toast('Browser blocked the notification — check your OS notification settings for Chrome.'); }
+    }
+  }
+
+  function sendTestNotification() {
+    if (typeof window === 'undefined' || !('Notification' in window)) { toast('This browser does not support notifications.'); return; }
+    if (Notification.permission !== 'granted') { toast('Click "Enable notifications" first.'); return; }
+    try {
+      new Notification('🔔 Test notification', { body: 'If you see this pop up from your OS (not just this toast), notifications are fully working.' });
+      toast('Test sent — check for an OS-level popup, not just this message.');
+    } catch (e) {
+      toast('Failed to send — your OS or browser is blocking it. Check Windows notification settings for Chrome, and make sure Focus Assist / Do Not Disturb is off.');
     }
   }
 
   function requestNotifPermission() {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    Notification.requestPermission().then((p) => setNotifPermission(p));
+    if (typeof window === 'undefined' || !('Notification' in window)) { toast('This browser does not support notifications.'); return; }
+    Notification.requestPermission().then((p) => {
+      setNotifPermission(p);
+      if (p === 'granted') toast('Notifications enabled on this browser.');
+      if (p === 'denied') toast('Notifications blocked. Click the padlock icon in the address bar → Notifications → Allow.');
+    });
   }
 
   useEffect(() => {
@@ -130,7 +149,7 @@ export default function Home() {
     if (data) {
       if (prevChatCount.current !== null && data.length > prevChatCount.current) {
         const newest = data[data.length - 1] as any;
-        if (newest.from_role !== profile?.role && tab !== 'chat') pushNotify('💬 New message', newest.text);
+        if (newest.from_role !== profile?.role && tabRef.current !== 'chat') pushNotify('💬 New message', newest.text);
       }
       prevChatCount.current = data.length;
       setChat(data as ChatMessage[]);
@@ -203,6 +222,7 @@ export default function Home() {
       toasts={toasts}
       notifPermission={notifPermission}
       requestNotifPermission={requestNotifPermission}
+      sendTestNotification={sendTestNotification}
     />
   );
 }
@@ -248,7 +268,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission }: any) {
+function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
   const navItems =
     role === 'director'
       ? [
@@ -266,6 +286,9 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
           { id: 'chat', label: 'Chat' },
         ];
 
+  const statusLabel = notifPermission === 'granted' ? 'Notifications on' : notifPermission === 'denied' ? 'Notifications blocked' : 'Notifications off';
+  const statusColor = notifPermission === 'granted' ? 'var(--mint)' : notifPermission === 'denied' ? 'var(--rose)' : 'var(--amber)';
+
   return (
     <div>
       <header className="top">
@@ -279,9 +302,17 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
           ))}
         </nav>
         <div className="top-actions">
+          <span className="pill" style={{ color: statusColor, borderColor: statusColor }} title="This is a per-browser setting — shared across every tab/login using this browser">
+            <i className="dot" style={{ background: statusColor, boxShadow: 'none' }} /> {statusLabel}
+          </span>
           {notifPermission !== 'granted' && (
-            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission} title="Get notified even when this tab isn't focused">
-              🔔 Enable notifications
+            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>
+              Enable
+            </button>
+          )}
+          {notifPermission === 'granted' && (
+            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>
+              Send test
             </button>
           )}
           <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
