@@ -618,7 +618,8 @@ function AIPortal({ role }: any) {
     try {
       const resp = await fetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, role, history: next }) });
       const data = await resp.json();
-      setHistory((h) => [...h.slice(0, -1), { role: 'assistant', text: data.reply || 'Sorry, no reply.' }]);
+      const replyText = data.reply || (data.error ? `⚠️ ${data.error}` : 'Sorry, no reply.');
+      setHistory((h) => [...h.slice(0, -1), { role: 'assistant', text: replyText }]);
     } catch {
       setHistory((h) => [...h.slice(0, -1), { role: 'assistant', text: 'Sorry, I could not reach the AI just now.' }]);
     }
