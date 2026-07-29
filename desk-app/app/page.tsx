@@ -40,13 +40,34 @@ export default function Home() {
 
   const toastId = useRef(0);
   const prevTaskCount = useRef<number | null>(null);
+  const prevUpdateCount = useRef<number | null>(null);
   const prevChatCount = useRef<number | null>(null);
+  const initialTabSet = useRef(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
 
   function toast(text: string) {
     const id = ++toastId.current;
     setToasts((t) => [...t, { id, text }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
   }
+
+  // real OS/browser-level notification (shows even if the tab isn't focused)
+  function pushNotify(title: string, body: string) {
+    toast(title);
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      try { new Notification(title, { body, icon: undefined }); } catch {}
+    }
+  }
+
+  function requestNotifPermission() {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    Notification.requestPermission().then((p) => setNotifPermission(p));
+  }
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) setNotifPermission(Notification.permission);
+  }, []);
 
   // ---------- auth bootstrap ----------
   useEffect(() => {
@@ -67,18 +88,37 @@ export default function Home() {
       });
   }, [session]);
 
+  // Land each role on the right home tab (EA never sees the Director overview)
+  useEffect(() => {
+    if (profile && !initialTabSet.current) {
+      initialTabSet.current = true;
+      setTab(profile.role === 'ea' ? 'tasks' : 'overview');
+    }
+  }, [profile]);
+
   // ---------- data loading ----------
   async function loadTasks() {
     const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
     if (data) {
       if (profile?.role === 'ea' && prevTaskCount.current !== null && data.length > prevTaskCount.current) {
-        toast('📌 New task from the Director');
+        const newest = [...data].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+        pushNotify('📌 New task from the Director', newest?.title || '');
       }
       prevTaskCount.current = data.length;
       setTasks(data as Task[]);
     }
     const { data: upd } = await supabase.from('task_updates').select('*').order('created_at', { ascending: true });
-    if (upd) setUpdates(upd as TaskUpdate[]);
+    if (upd) {
+      if (profile?.role === 'director' && prevUpdateCount.current !== null && upd.length > prevUpdateCount.current) {
+        const newOnes = upd.slice(prevUpdateCount.current).filter((u: any) => u.by_role === 'ea');
+        if (newOnes.length) {
+          const t = data?.find((x: any) => x.id === newOnes[newOnes.length - 1].task_id);
+          pushNotify('✅ Update from the EA', `${t ? t.title + ' — ' : ''}${newOnes[newOnes.length - 1].text}`);
+        }
+      }
+      prevUpdateCount.current = upd.length;
+      setUpdates(upd as TaskUpdate[]);
+    }
   }
   async function loadReminders() {
     if (!profile) return;
@@ -88,7 +128,10 @@ export default function Home() {
   async function loadChat() {
     const { data } = await supabase.from('chat_messages').select('*').order('created_at', { ascending: true });
     if (data) {
-      if (prevChatCount.current !== null && data.length > prevChatCount.current && tab !== 'chat') toast('New message received.');
+      if (prevChatCount.current !== null && data.length > prevChatCount.current) {
+        const newest = data[data.length - 1] as any;
+        if (newest.from_role !== profile?.role && tab !== 'chat') pushNotify('💬 New message', newest.text);
+      }
       prevChatCount.current = data.length;
       setChat(data as ChatMessage[]);
     }
@@ -158,6 +201,8 @@ export default function Home() {
       toast={toast}
       reload={{ loadTasks, loadReminders, loadChat }}
       toasts={toasts}
+      notifPermission={notifPermission}
+      requestNotifPermission={requestNotifPermission}
     />
   );
 }
@@ -203,7 +248,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts }: any) {
+function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission }: any) {
   const navItems =
     role === 'director'
       ? [
@@ -234,6 +279,11 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
           ))}
         </nav>
         <div className="top-actions">
+          {notifPermission !== 'granted' && (
+            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission} title="Get notified even when this tab isn't focused">
+              🔔 Enable notifications
+            </button>
+          )}
           <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
           <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
         </div>
