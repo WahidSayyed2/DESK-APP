@@ -38,6 +38,7 @@ export default function Home() {
   const [loginBusy, setLoginBusy] = useState(false);
 
   const [tab, setTab] = useState<Tab>('overview');
+  const [taskFocus, setTaskFocus] = useState<{ kind: 'ring' | 'single'; key?: string; label?: string; id?: string } | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [updates, setUpdates] = useState<TaskUpdate[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -237,7 +238,10 @@ export default function Home() {
     <Shell
       role={profile.role}
       tab={tab}
-      setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); }}
+      setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); if (t !== 'tasks') setTaskFocus(null); }}
+      goToTasks={(focus: any) => { setTab('tasks'); setTaskFocus(focus || null); markTasksRead(); }}
+      taskFocus={taskFocus}
+      setTaskFocus={setTaskFocus}
       unread={unread}
       onLogout={logout}
       tasks={tasks}
@@ -296,7 +300,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
   const navItems =
     role === 'director'
       ? [
@@ -349,9 +353,9 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
       <div className="main-content">
         <main>
           <section className="section">
-            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} unread={unread} />}
+            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} />}
             {tab === 'newtask' && <NewTask toast={toast} reload={reload} />}
-            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} />}
+            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} />}
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
             {tab === 'ai' && <AIPortal role={role} />}
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
@@ -393,7 +397,7 @@ function Ring({ value, total, color, label, sub, onClick }: any) {
 // =========================================================
 // Dashboard — shared landing page for both Director and EA
 // =========================================================
-function Dashboard({ role, tasks, updates, setTab, unread }: any) {
+function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
   const total = tasks.length;
   const done = tasks.filter((t: Task) => t.status === 'completed').length;
   const progress = tasks.filter((t: Task) => !['captured', 'completed'].includes(t.status)).length;
@@ -411,6 +415,29 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
   });
   feed.sort((a, b) => b.ts - a.ts);
 
+  const weight: any = { critical: 4, high: 3, medium: 2, low: 1 };
+  const leverage = tasks
+    .filter((t: Task) => t.status !== 'completed')
+    .slice()
+    .sort((a: Task, b: Task) => {
+      const w = (weight[b.priority] || 0) - (weight[a.priority] || 0);
+      if (w !== 0) return w;
+      const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+      const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+      return ad - bd;
+    })
+    .slice(0, 4);
+
+  function taskCode(t: Task) {
+    const prefix: any = { Tasks: 'TSK', Operations: 'OPS', Development: 'DEV', 'Cost Improvement': 'COST' };
+    const year = new Date(t.created_at).getFullYear();
+    return `${prefix[t.category] || 'TSK'}-${year}-${t.id.slice(0, 4).toUpperCase()}`;
+  }
+  function lastUpdateText(t: Task) {
+    const tUpdates = updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return tUpdates[0]?.text || (t.due_date ? `Due ${t.due_date}` : 'No updates yet');
+  }
+
   return (
     <>
       <div className="eyebrow">Command</div>
@@ -418,11 +445,11 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
       <p className="sub">{role === 'director' ? 'Everything the EA is executing, live — no need to ask.' : 'Everything on your plate, at a glance.'}</p>
 
       <div className="ring-strip">
-        <Ring value={total} total={total || 1} color="var(--blue)" label="Total tasks" sub="All time" />
-        <Ring value={fresh} total={total || 1} color="var(--rose)" label="Not picked up" sub="Needs action" onClick={() => setTab('tasks')} />
-        <Ring value={progress} total={total || 1} color="var(--amber)" label="In progress" sub="Being worked on" onClick={() => setTab('tasks')} />
-        <Ring value={critical} total={total || 1} color="#ff2d55" label="Critical" sub="Needs urgent attention" onClick={() => setTab('tasks')} />
-        <Ring value={done} total={total || 1} color="var(--mint)" label="Completed" sub="Closed out" onClick={() => setTab('tasks')} />
+        <Ring value={total} total={total || 1} color="var(--blue)" label="Total tasks" sub="All time" onClick={() => setTab('tasks')} />
+        <Ring value={fresh} total={total || 1} color="var(--rose)" label="Not picked up" sub="Needs action" onClick={() => goToTasks({ kind: 'ring', key: 'captured', label: 'Not picked up' })} />
+        <Ring value={progress} total={total || 1} color="var(--amber)" label="In progress" sub="Being worked on" onClick={() => goToTasks({ kind: 'ring', key: 'progress', label: 'In progress' })} />
+        <Ring value={critical} total={total || 1} color="#ff2d55" label="Critical" sub="Needs urgent attention" onClick={() => goToTasks({ kind: 'ring', key: 'critical', label: 'Critical' })} />
+        <Ring value={done} total={total || 1} color="var(--mint)" label="Completed" sub="Closed out" onClick={() => goToTasks({ kind: 'ring', key: 'completed', label: 'Completed' })} />
       </div>
 
       {(overdue > 0 || critical > 0 || dueToday > 0) && (
@@ -433,15 +460,31 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
             <div><span className="pill prio-critical">{critical} critical</span></div>
             <div><span className="pill status-progress">{dueToday} due today</span></div>
           </div>
-          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', marginLeft: 'auto' }} onClick={() => setTab('tasks')}>Review →</button>
+          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', marginLeft: 'auto' }} onClick={() => goToTasks({ kind: 'ring', key: 'overdue', label: 'Overdue' })}>Review →</button>
         </div>
       )}
+
+      <div className="glass card-block" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Highest-leverage work now</h3>
+          <button className="dark-btn" onClick={() => setTab('tasks')}>Open full execution cockpit</button>
+        </div>
+        {leverage.length ? leverage.map((t: Task) => (
+          <div key={t.id} className="leverage-row">
+            <div>
+              <div className="leverage-title">{t.title}</div>
+              <div className="leverage-sub">{taskCode(t)} · {STAGE_LABELS[t.status]} · {t.priority} · {lastUpdateText(t)}</div>
+            </div>
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', flexShrink: 0 }} onClick={() => goToTasks({ kind: 'single', id: t.id })}>Open</button>
+          </div>
+        )) : <div className="empty">Nothing open right now.</div>}
+      </div>
 
       <div className="category-strip">
         {CATEGORIES.map((c: Category, i: number) => {
           const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'completed').length;
           return (
-            <button key={c} className="category-card" onClick={() => setTab('tasks')}>
+            <button key={c} className="category-card" onClick={() => goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
               <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
               <span className="cc-name">{c}</span>
               <span className="cc-count">{count} open</span>
@@ -459,6 +502,7 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
                 <div className="f-time">{new Date(f.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                 <div className="f-who">{f.who}</div>
                 <div className="f-text">{f.text}</div>
+
               </div>
             )) : <div className="empty">No activity yet.</div>}
           </div>
@@ -598,7 +642,7 @@ function NewTask({ toast, reload }: any) {
 // =========================================================
 // Tasks — kanban pipeline (Captured -> Progress -> Follow-up -> Update -> Closure -> Completed)
 // =========================================================
-function Tasks({ role, tasks, updates, reload, toast }: any) {
+function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
   async function moveStage(id: string, dir: 1 | -1) {
     const t = tasks.find((x: Task) => x.id === id);
     if (!t) return;
@@ -630,15 +674,62 @@ function Tasks({ role, tasks, updates, reload, toast }: any) {
     toast(when ? 'Reminder set for this task.' : 'Reminder removed.');
   }
 
+  // ---- single-task focus: show just that one card, nothing else ----
+  if (focus?.kind === 'single') {
+    const t = tasks.find((x: Task) => x.id === focus.id);
+    return (
+      <>
+        <div className="eyebrow">Focused view</div>
+        <h2>One task.</h2>
+        <p className="sub">Just this card — nothing else on the board.</p>
+        <button className="soft-btn" style={{ marginBottom: 18 }} onClick={() => setFocus(null)}>← Back to full pipeline</button>
+        {t ? (
+          <div style={{ maxWidth: 420 }}>
+            <TaskCard
+              t={t}
+              role={role}
+              stage={t.status}
+              updates={updates.filter((u: TaskUpdate) => u.task_id === t.id)}
+              moveStage={moveStage}
+              postUpdate={postUpdate}
+              setReminder={setReminder}
+            />
+          </div>
+        ) : <div className="empty">That task isn't around anymore.</div>}
+      </>
+    );
+  }
+
+  // ---- ring focus: filter the whole board down to a matching subset ----
+  const today = new Date().toISOString().slice(0, 10);
+  let filtered = tasks;
+  let filterLabel = '';
+  if (focus?.kind === 'ring') {
+    filterLabel = focus.label || '';
+    if (focus.key === 'captured') filtered = tasks.filter((t: Task) => t.status === 'captured');
+    else if (focus.key === 'progress') filtered = tasks.filter((t: Task) => !['captured', 'completed'].includes(t.status));
+    else if (focus.key === 'critical') filtered = tasks.filter((t: Task) => t.priority === 'critical' && t.status !== 'completed');
+    else if (focus.key === 'completed') filtered = tasks.filter((t: Task) => t.status === 'completed');
+    else if (focus.key === 'overdue') filtered = tasks.filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'completed');
+    else if (focus.key?.startsWith('category:')) filtered = tasks.filter((t: Task) => (t.category || 'Tasks') === focus.key.slice(9) && t.status !== 'completed');
+  }
+
   return (
     <>
       <div className="eyebrow">{role === 'ea' ? 'Execute' : 'Oversight'}</div>
       <h2>{role === 'ea' ? 'Live execution pipeline.' : "Director's pipeline view."}</h2>
       <p className="sub">{role === 'ea' ? 'Drag a card to move it — or use the buttons. Set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
 
+      {focus?.kind === 'ring' && (
+        <div className="filter-bar">
+          <span>Showing: <b>{filterLabel}</b> ({filtered.length})</span>
+          <button className="tiny-btn" onClick={() => setFocus(null)}>Clear filter ✕</button>
+        </div>
+      )}
+
       <div className="pipeline-board" style={{ marginTop: 22 }}>
         {STAGES.map((stage) => {
-          const stageTasks = tasks.filter((t: Task) => t.status === stage);
+          const stageTasks = filtered.filter((t: Task) => t.status === stage);
           return (
             <div
               className="pipeline-col"
@@ -704,12 +795,12 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       </div>
 
       {t.reminder_at && (
-        <div className="reminder-badge" onClick={() => setShowReminder((s) => !s)}>
+        <div className="reminder-badge" onMouseDown={(e) => e.stopPropagation()} onClick={() => setShowReminder((s) => !s)}>
           ⏰ {new Date(t.reminder_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </div>
       )}
 
-      <div className="actions-row" style={{ marginTop: 10 }}>
+      <div className="actions-row" style={{ marginTop: 10 }} onMouseDown={(e) => e.stopPropagation()}>
         {canGoBack && <button className="tiny-btn" onClick={() => moveStage(t.id, -1)}>← Back</button>}
         {canAdvance && <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => moveStage(t.id, 1)}>Advance →</button>}
         <button className="tiny-btn" onClick={() => setShowReminder((s) => !s)}>⏰ Remind</button>
@@ -717,7 +808,7 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       </div>
 
       {showReminder && (
-        <div className="reminder-form">
+        <div className="reminder-form" onMouseDown={(e) => e.stopPropagation()}>
           <label style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 800, color: '#5b656e', display: 'block', marginBottom: 6 }}>
             Remind at
           </label>
@@ -735,7 +826,7 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       )}
 
       {showUpdates && (
-        <div className="w-updates">
+        <div className="w-updates" onMouseDown={(e) => e.stopPropagation()}>
           {updates.length ? updates.map((u: TaskUpdate) => (
             <div className="upd-line" key={u.id}><b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text} <span style={{ color: '#9aa2a9' }}>· {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
           )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No updates yet.</div>}
