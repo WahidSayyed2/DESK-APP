@@ -205,7 +205,8 @@ export default function Home() {
   const prevNotifCount = useRef<number | null>(null);
   async function loadNotifs() {
     if (!profile) return;
-    const { data } = await supabase.from('notifications').select('*').eq('recipient_role', profile.role).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('notifications').select('*').eq('recipient_role', profile.role).order('created_at', { ascending: false });
+    if (error) { console.error('loadNotifs failed:', error.message); return; }
     if (data) {
       const unseenNow = data.filter((n: any) => !n.seen).length;
       if (prevNotifCount.current !== null && unseenNow > prevNotifCount.current) {
@@ -217,7 +218,13 @@ export default function Home() {
     }
   }
   async function notifyRole(recipientRole: Role, text: string, taskId: string | null = null) {
-    await supabase.from('notifications').insert({ recipient_role: recipientRole, text, task_id: taskId });
+    const { error } = await supabase.from('notifications').insert({ recipient_role: recipientRole, text, task_id: taskId });
+    if (error) {
+      toast('⚠️ Notification not saved: ' + error.message + ' — has the notifications migration been run in Supabase?');
+      console.error('notifyRole failed:', error.message);
+    } else {
+      loadNotifs();
+    }
   }
   async function markNotifSeen(id: string) {
     await supabase.from('notifications').update({ seen: true }).eq('id', id);
@@ -431,32 +438,6 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           </button>
         </div>
 
-        <div className="bell-wrap">
-          <button className="bell-btn" onClick={() => setBellOpen((b) => !b)} title="Notifications">
-            🔔{!collapsed && <span>Notifications</span>}
-            {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
-          </button>
-          {bellOpen && (
-            <div className="bell-panel">
-              <div className="bell-panel-head">
-                <span>Notifications</span>
-                {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
-              </div>
-              <div className="bell-panel-list">
-                {(notifs || []).length ? notifs.map((n: Notif) => (
-                  <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
-                    <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
-                      {n.text}
-                      <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                    </div>
-                    {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
-                  </div>
-                )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
-              </div>
-            </div>
-          )}
-        </div>
-
         <nav className="nav">
           {navItems.map((item: any) => (
             <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)} title={collapsed ? item.label : undefined}>
@@ -484,6 +465,29 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         )}
       </aside>
       <div className="main-content">
+        <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
+          🔔
+          {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
+        </button>
+        {bellOpen && (
+          <div className="bell-panel bell-panel-fixed">
+            <div className="bell-panel-head">
+              <span>Notifications</span>
+              {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+            </div>
+            <div className="bell-panel-list">
+              {(notifs || []).length ? notifs.map((n: Notif) => (
+                <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
+                  <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
+                    {n.text}
+                    <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                  {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
+                </div>
+              )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
+            </div>
+          </div>
+        )}
         <main>
           <section className="section">
             {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} />}
