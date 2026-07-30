@@ -508,6 +508,16 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
     return tUpdates[0]?.text || (t.due_date ? `Due ${t.due_date}` : 'No updates yet');
   }
 
+  const attentionCount = overdue + critical + dueToday;
+  const movedBeyondCapturePct = total > 0 ? Math.round((tasks.filter((t: Task) => t.status !== 'captured').length / total) * 100) : 0;
+  const activeReminders = tasks.filter((t: Task) => t.reminder_at && new Date(t.reminder_at).getTime() > Date.now()).length;
+  const completedThisWeek = tasks.filter((t: Task) => {
+    if (t.status !== 'completed') return false;
+    const latestCompletionUpdate = updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    const ts = latestCompletionUpdate ? new Date(latestCompletionUpdate.created_at).getTime() : new Date(t.created_at).getTime();
+    return ts > Date.now() - 7 * 24 * 60 * 60 * 1000;
+  }).length;
+
   return (
     <>
       <div className="eyebrow">Command</div>
@@ -522,17 +532,35 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
         <Ring value={done} total={total || 1} color="var(--mint)" label="Completed" sub="Closed out" onClick={() => goToTasks({ kind: 'ring', key: 'completed', label: 'Completed' })} />
       </div>
 
-      {(overdue > 0 || critical > 0 || dueToday > 0) && (
-        <div className="glass card-block alert-box" style={{ marginBottom: 20 }}>
-          <div className="alert-num">{overdue}</div>
-          <div className="alert-breakdown">
-            <div><span className="pill status-captured">{overdue} overdue</span></div>
-            <div><span className="pill prio-critical">{critical} critical</span></div>
-            <div><span className="pill status-progress">{dueToday} due today</span></div>
+      <div className="grid-2" style={{ marginBottom: 20 }}>
+        <div className="glass card-block attention-card">
+          <div className="eyebrow" style={{ color: 'var(--violet)' }}>Today's attention</div>
+          <h3 style={{ fontSize: 24, margin: '4px 0 8px' }}>Only what needs your eyes.</h3>
+          <p className="sub" style={{ fontSize: 12, marginBottom: 18 }}>
+            {role === 'director' ? 'Everything else stays with the EA until the result is delivered.' : 'Everything else keeps moving without needing a check-in.'}
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+            <div className="alert-num">{String(attentionCount).padStart(2, '0')}</div>
+            <div className="alert-breakdown">
+              <div><span className="pill status-captured">{overdue} overdue</span></div>
+              <div><span className="pill prio-critical">{critical} critical</span></div>
+              <div><span className="pill status-progress">{dueToday} due today</span></div>
+            </div>
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', marginLeft: 'auto' }} onClick={() => goToTasks({ kind: 'ring', key: 'overdue', label: 'Overdue' })}>Review →</button>
           </div>
-          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', marginLeft: 'auto' }} onClick={() => goToTasks({ kind: 'ring', key: 'overdue', label: 'Overdue' })}>Review →</button>
         </div>
-      )}
+        <div className="glass card-block">
+          <span className="pill" style={{ color: 'var(--mint)', borderColor: 'rgba(101,237,189,.3)', marginBottom: 16 }}>
+            <i className="dot" style={{ background: 'var(--mint)', boxShadow: 'none' }} /> Execution pulse
+          </span>
+          <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.3, margin: '10px 0' }}>
+            {movedBeyondCapturePct}% of work has moved beyond capture.
+          </div>
+          <p className="sub" style={{ fontSize: 12 }}>
+            {activeReminders} reminder{activeReminders !== 1 ? 's' : ''} currently active · {completedThisWeek} completed this week
+          </p>
+        </div>
+      </div>
 
       <div className="category-strip">
         {CATEGORIES.map((c: Category, i: number) => {

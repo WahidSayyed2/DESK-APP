@@ -80,6 +80,7 @@ h1,h2,h3,p{margin-top:0}
 .work-critical{border:1.5px solid rgba(255,45,85,.5);box-shadow:0 0 0 1px rgba(255,45,85,.15)}
 
 .alert-box{display:flex;align-items:center;gap:20px;flex-wrap:wrap;border-color:rgba(255,45,85,.3)}
+.attention-card{border-color:rgba(169,156,255,.3);background:linear-gradient(145deg,rgba(169,156,255,.08),rgba(255,255,255,.02))}
 .alert-num{font-family:inherit;font-size:40px;font-weight:900;color:#ff2d55;letter-spacing:-.03em;line-height:1}
 .alert-breakdown{display:flex;gap:10px;flex-wrap:wrap}
 
