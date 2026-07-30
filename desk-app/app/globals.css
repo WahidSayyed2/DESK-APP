@@ -37,8 +37,14 @@ button{cursor:pointer}
 
 /* ---- shell: left sidebar layout ---- */
 .app-shell{display:flex;min-height:100vh}
-.sidebar{width:246px;flex-shrink:0;background:rgba(5,12,18,.6);border-right:1px solid var(--line);backdrop-filter:blur(24px);display:flex;flex-direction:column;padding:22px 16px;position:sticky;top:0;height:100vh;overflow-y:auto}
-.brand{display:flex;align-items:center;gap:12px;font-size:12px;font-weight:900;letter-spacing:.14em;white-space:nowrap;padding:0 6px 22px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.sidebar{width:246px;flex-shrink:0;background:rgba(5,12,18,.6);border-right:1px solid var(--line);backdrop-filter:blur(24px);display:flex;flex-direction:column;padding:22px 16px;position:sticky;top:0;height:100vh;overflow-y:auto;transition:width .2s ease,padding .2s ease}
+.app-shell.sidebar-collapsed .sidebar{width:72px;padding:22px 10px}
+.app-shell.sidebar-collapsed .nav button{justify-content:center}
+.brand{display:flex;align-items:center;gap:12px;font-size:12px;font-weight:900;letter-spacing:.14em;white-space:nowrap;padding:0 6px 22px;border-bottom:1px solid var(--line);margin-bottom:18px;position:relative}
+.app-shell.sidebar-collapsed .brand{justify-content:center;padding:0 0 22px}
+.sidebar-toggle{position:absolute;right:-14px;top:-2px;width:26px;height:26px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:#cbd5dd;font-size:11px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.sidebar-toggle:hover{border-color:var(--acid);color:var(--acid)}
+.app-shell.sidebar-collapsed .sidebar-toggle{position:static;margin-left:0}
 .brandmark{width:38px;height:38px;border-radius:14px;background:linear-gradient(145deg,var(--violet),#6048ff 60%,#2c356f);display:grid;place-items:center;font-size:14px;box-shadow:0 14px 34px rgba(96,72,255,.30);flex-shrink:0}
 .nav{display:flex;flex-direction:column;gap:4px;flex:1}
 .nav button{font-size:12.5px;color:#aeb8c2;padding:11px 13px;border:1px solid transparent;border-radius:12px;transition:.15s;background:transparent;white-space:nowrap;display:flex;align-items:center;gap:10px;text-align:left;font-weight:600}
@@ -80,9 +86,21 @@ h1,h2,h3,p{margin-top:0}
 .category-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
 .category-card{border-radius:20px;padding:20px 18px;background:linear-gradient(180deg,var(--paper),var(--paper2));color:var(--ink);border:1px solid rgba(12,18,24,.08);text-align:left;display:flex;flex-direction:column;gap:8px;transition:.15s}
 .category-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.category-card .cc-top{display:flex;align-items:center;justify-content:space-between}
 .category-card .cc-index{font-size:9px;font-weight:900;letter-spacing:.12em;color:#8a95a0;text-transform:uppercase}
+.category-card .cc-icon{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800}
 .category-card .cc-name{font-size:19px;font-weight:800;letter-spacing:-.02em}
 .category-card .cc-count{font-size:11px;color:#5b656e;font-weight:700}
+
+.reminder-alert-stack{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:999;display:flex;flex-direction:column;gap:12px;width:min(440px,92vw)}
+.reminder-alert{display:flex;gap:14px;align-items:flex-start;background:linear-gradient(145deg,#1b2233,#12151f);border:1.5px solid var(--acid);border-radius:20px;padding:18px 20px;box-shadow:0 24px 60px rgba(0,0,0,.5);animation:alertdrop .3s ease}
+@keyframes alertdrop{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+.reminder-alert-icon{font-size:26px;flex-shrink:0}
+.reminder-alert-body{flex:1;min-width:0}
+.reminder-alert-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;color:var(--acid);margin-bottom:4px}
+.reminder-alert-text{font-size:14px;font-weight:700;color:#fff;line-height:1.4}
+.reminder-alert-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.reminder-alert-actions button{white-space:nowrap;padding:8px 12px;font-size:11px}
 
 .hero{border-radius:34px;padding:32px;background:radial-gradient(circle at 88% 12%,rgba(169,156,255,.30),transparent 28%),radial-gradient(circle at 62% 86%,rgba(114,228,255,.16),transparent 26%),linear-gradient(145deg,#152230,#0b151f 58%,#111927);position:relative;overflow:hidden}
 .capture{display:grid;grid-template-columns:44px 1fr auto;gap:10px;margin-top:20px;align-items:start}

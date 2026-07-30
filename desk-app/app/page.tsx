@@ -62,6 +62,31 @@ export default function Home() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
   }
 
+  // audible alarm — three ascending beeps, no external audio file needed
+  function playAlarm() {
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new Ctx();
+      const beep = (time: number, freq: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(0.35, time + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(time);
+        osc.stop(time + 0.4);
+      };
+      const now = ctx.currentTime;
+      beep(now, 740);
+      beep(now + 0.45, 880);
+      beep(now + 0.9, 1046);
+    } catch (e) { /* audio not available, ignore */ }
+  }
+
   // real OS/browser-level notification (shows even if the tab isn't focused)
   function pushNotify(title: string, body: string) {
     toast(title);
@@ -72,12 +97,24 @@ export default function Home() {
     }
   }
 
+  // prominent on-screen alert that stays until dismissed — for reminders specifically
+  const [reminderAlerts, setReminderAlerts] = useState<{ id: string; title: string; taskId: string }[]>([]);
+  function fireReminderAlert(taskId: string, title: string) {
+    playAlarm();
+    pushNotify('⏰ Reminder', title);
+    setReminderAlerts((a) => [...a, { id: taskId + Date.now(), title, taskId }]);
+  }
+  function dismissReminderAlert(id: string) {
+    setReminderAlerts((a) => a.filter((r) => r.id !== id));
+  }
+
   function sendTestNotification() {
     if (typeof window === 'undefined' || !('Notification' in window)) { toast('This browser does not support notifications.'); return; }
     if (Notification.permission !== 'granted') { toast('Click "Enable notifications" first.'); return; }
     try {
+      playAlarm();
       new Notification('🔔 Test notification', { body: 'If you see this pop up from your OS (not just this toast), notifications are fully working.' });
-      toast('Test sent — check for an OS-level popup, not just this message.');
+      toast('Test sent — check for an OS-level popup and an alarm sound.');
     } catch (e) {
       toast('Failed to send — your OS or browser is blocking it. Check Windows notification settings for Chrome, and make sure Focus Assist / Do Not Disturb is off.');
     }
@@ -201,7 +238,7 @@ export default function Home() {
         const due = new Date(t.reminder_at).getTime();
         if (due <= now && due > now - 5 * 60 * 1000 && !firedReminders.current.has(t.id + t.reminder_at)) {
           firedReminders.current.add(t.id + t.reminder_at);
-          pushNotify('⏰ Reminder', t.title);
+          fireReminderAlert(t.id, t.title);
         }
       });
     };
@@ -235,27 +272,51 @@ export default function Home() {
   }
 
   return (
-    <Shell
-      role={profile.role}
-      tab={tab}
-      setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); if (t !== 'tasks') setTaskFocus(null); }}
-      goToTasks={(focus: any) => { setTab('tasks'); setTaskFocus(focus || null); markTasksRead(); }}
-      taskFocus={taskFocus}
-      setTaskFocus={setTaskFocus}
-      unread={unread}
-      onLogout={logout}
-      tasks={tasks}
-      updates={updates}
-      reminders={reminders}
-      chat={chat}
-      profile={profile}
-      toast={toast}
-      reload={{ loadTasks, loadReminders, loadChat }}
-      toasts={toasts}
-      notifPermission={notifPermission}
-      requestNotifPermission={requestNotifPermission}
-      sendTestNotification={sendTestNotification}
-    />
+    <>
+      <Shell
+        role={profile.role}
+        tab={tab}
+        setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); if (t !== 'tasks') setTaskFocus(null); }}
+        goToTasks={(focus: any) => { setTab('tasks'); setTaskFocus(focus || null); markTasksRead(); }}
+        taskFocus={taskFocus}
+        setTaskFocus={setTaskFocus}
+        unread={unread}
+        onLogout={logout}
+        tasks={tasks}
+        updates={updates}
+        reminders={reminders}
+        chat={chat}
+        profile={profile}
+        toast={toast}
+        reload={{ loadTasks, loadReminders, loadChat }}
+        toasts={toasts}
+        notifPermission={notifPermission}
+        requestNotifPermission={requestNotifPermission}
+        sendTestNotification={sendTestNotification}
+      />
+      {reminderAlerts.length > 0 && (
+        <div className="reminder-alert-stack">
+          {reminderAlerts.map((r) => (
+            <div className="reminder-alert" key={r.id}>
+              <div className="reminder-alert-icon">⏰</div>
+              <div className="reminder-alert-body">
+                <div className="reminder-alert-title">Reminder</div>
+                <div className="reminder-alert-text">{r.title}</div>
+              </div>
+              <div className="reminder-alert-actions">
+                <button
+                  className="acid-btn"
+                  onClick={() => { setTab('tasks'); setTaskFocus({ kind: 'single', id: r.taskId }); dismissReminderAlert(r.id); }}
+                >
+                  View task
+                </button>
+                <button className="soft-btn" onClick={() => dismissReminderAlert(r.id)}>Dismiss</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -301,6 +362,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // App shell
 // =========================================================
 function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+  const [collapsed, setCollapsed] = useState(false);
   const navItems =
     role === 'director'
       ? [
@@ -323,32 +385,40 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
   const statusColor = notifPermission === 'granted' ? 'var(--mint)' : notifPermission === 'denied' ? 'var(--rose)' : 'var(--amber)';
 
   return (
-    <div className="app-shell">
+    <div className={'app-shell' + (collapsed ? ' sidebar-collapsed' : '')}>
       <aside className="sidebar">
-        <div className="brand"><div className="brandmark">D</div> THE DESK</div>
+        <div className="brand">
+          <div className="brandmark">D</div>
+          {!collapsed && <span>THE DESK</span>}
+          <button className="sidebar-toggle" onClick={() => setCollapsed((c) => !c)} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            {collapsed ? '»' : '«'}
+          </button>
+        </div>
         <nav className="nav">
           {navItems.map((item: any) => (
-            <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
-              <span>{item.ic}</span><span>{item.label}</span>
+            <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)} title={collapsed ? item.label : undefined}>
+              <span>{item.ic}</span>{!collapsed && <span>{item.label}</span>}
               {item.badge && unread > 0 && <span className="badge">{unread}</span>}
             </button>
           ))}
         </nav>
-        <div className="sidebar-foot">
-          <span className="pill" style={{ color: statusColor, borderColor: statusColor }} title="This is a per-browser setting — shared across every tab/login using this browser">
-            <i className="dot" style={{ background: statusColor, boxShadow: 'none' }} /> {statusLabel}
-          </span>
-          <div className="top-actions">
-            {notifPermission !== 'granted' && (
-              <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>Enable notifications</button>
-            )}
-            {notifPermission === 'granted' && (
-              <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>Send test</button>
-            )}
+        {!collapsed && (
+          <div className="sidebar-foot">
+            <span className="pill" style={{ color: statusColor, borderColor: statusColor }} title="This is a per-browser setting — shared across every tab/login using this browser">
+              <i className="dot" style={{ background: statusColor, boxShadow: 'none' }} /> {statusLabel}
+            </span>
+            <div className="top-actions">
+              {notifPermission !== 'granted' && (
+                <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>Enable notifications</button>
+              )}
+              {notifPermission === 'granted' && (
+                <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>Send test</button>
+              )}
+            </div>
+            <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
+            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
           </div>
-          <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
-          <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
-        </div>
+        )}
       </aside>
       <div className="main-content">
         <main>
@@ -464,6 +534,29 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
         </div>
       )}
 
+      <div className="category-strip">
+        {CATEGORIES.map((c: Category, i: number) => {
+          const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'completed').length;
+          const meta: any = {
+            Tasks: { icon: '✓', accent: '#5798ff' },
+            Operations: { icon: '⚙', accent: '#65edbd' },
+            Development: { icon: '</>' , accent: '#a99cff' },
+            'Cost Improvement': { icon: '↓', accent: '#ffbd64' },
+          };
+          const m = meta[c] || meta.Tasks;
+          return (
+            <button key={c} className="category-card" style={{ borderTop: `4px solid ${m.accent}` }} onClick={() => goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
+              <div className="cc-top">
+                <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
+                <span className="cc-icon" style={{ background: m.accent + '22', color: m.accent }}>{m.icon}</span>
+              </div>
+              <span className="cc-name">{c}</span>
+              <span className="cc-count">{count} open</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="glass card-block" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ margin: 0 }}>Highest-leverage work now</h3>
@@ -478,19 +571,6 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
             <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', flexShrink: 0 }} onClick={() => goToTasks({ kind: 'single', id: t.id })}>Open</button>
           </div>
         )) : <div className="empty">Nothing open right now.</div>}
-      </div>
-
-      <div className="category-strip">
-        {CATEGORIES.map((c: Category, i: number) => {
-          const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'completed').length;
-          return (
-            <button key={c} className="category-card" onClick={() => goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
-              <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
-              <span className="cc-name">{c}</span>
-              <span className="cc-count">{count} open</span>
-            </button>
-          );
-        })}
       </div>
 
       <div className="grid-2">
