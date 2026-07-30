@@ -507,16 +507,52 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
     const tUpdates = updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return tUpdates[0]?.text || (t.due_date ? `Due ${t.due_date}` : 'No updates yet');
   }
+  function completionTime(t: Task) {
+    const latest = updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    return latest ? new Date(latest.created_at).getTime() : new Date(t.created_at).getTime();
+  }
+  function fmtDuration(ms: number) {
+    if (ms < 60 * 60 * 1000) return Math.max(1, Math.round(ms / 60000)) + 'm';
+    if (ms < 24 * 60 * 60 * 1000) return Math.round(ms / 3600000) + 'h';
+    return Math.round(ms / 86400000) + 'd';
+  }
 
   const attentionCount = overdue + critical + dueToday;
   const movedBeyondCapturePct = total > 0 ? Math.round((tasks.filter((t: Task) => t.status !== 'captured').length / total) * 100) : 0;
   const activeReminders = tasks.filter((t: Task) => t.reminder_at && new Date(t.reminder_at).getTime() > Date.now()).length;
-  const completedThisWeek = tasks.filter((t: Task) => {
-    if (t.status !== 'completed') return false;
-    const latestCompletionUpdate = updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-    const ts = latestCompletionUpdate ? new Date(latestCompletionUpdate.created_at).getTime() : new Date(t.created_at).getTime();
-    return ts > Date.now() - 7 * 24 * 60 * 60 * 1000;
-  }).length;
+  const now = Date.now();
+  const oneWeek = 7 * 24 * 60 * 60 * 1000;
+  const completedThisWeek = tasks.filter((t: Task) => t.status === 'completed' && completionTime(t) > now - oneWeek).length;
+  const completedLastWeek = tasks.filter((t: Task) => t.status === 'completed' && completionTime(t) <= now - oneWeek && completionTime(t) > now - 2 * oneWeek).length;
+  const weekDelta = completedThisWeek - completedLastWeek;
+
+  // average time spent in each stage, derived from the "Moved to X" trail in task_updates
+  const stageDurations: Record<string, { total: number; count: number }> = {};
+  STAGES.forEach((s) => { stageDurations[s] = { total: 0, count: 0 }; });
+  tasks.forEach((t: Task) => {
+    const trail = updates
+      .filter((u: TaskUpdate) => u.task_id === t.id && u.text.startsWith('Moved to "'))
+      .sort((a: TaskUpdate, b: TaskUpdate) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const events: { ts: number; stage: Stage }[] = [{ ts: new Date(t.created_at).getTime(), stage: 'captured' }];
+    trail.forEach((u: TaskUpdate) => {
+      const m = u.text.match(/Moved to "([^"]+)"/);
+      const found = m && (Object.keys(STAGE_LABELS) as Stage[]).find((k) => STAGE_LABELS[k] === m[1]);
+      if (found) events.push({ ts: new Date(u.created_at).getTime(), stage: found });
+    });
+    for (let i = 0; i < events.length; i++) {
+      const start = events[i].ts;
+      const end = i + 1 < events.length ? events[i + 1].ts : now;
+      stageDurations[events[i].stage].total += end - start;
+      stageDurations[events[i].stage].count += 1;
+    }
+  });
+
+  // overdue tasks sorted by how long they've been stuck, not just a binary count
+  const overdueAged = tasks
+    .filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'completed')
+    .map((t: Task) => ({ t, days: Math.floor((now - new Date(t.due_date as string).getTime()) / 86400000) }))
+    .sort((a: { days: number }, b: { days: number }) => b.days - a.days)
+    .slice(0, 5);
 
   return (
     <>
@@ -559,6 +595,58 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
           <p className="sub" style={{ fontSize: 12 }}>
             {activeReminders} reminder{activeReminders !== 1 ? 's' : ''} currently active · {completedThisWeek} completed this week
           </p>
+        </div>
+      </div>
+
+      <div className="grid-2" style={{ marginBottom: 20 }}>
+        <div className="glass card-block">
+          <h3 style={{ marginBottom: 4 }}>Weekly digest</h3>
+          <p className="sub" style={{ fontSize: 11.5, marginBottom: 16 }}>This week vs last week — is work speeding up or slowing down.</p>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 18 }}>
+            <div style={{ fontSize: 32, fontWeight: 900 }}>{completedThisWeek}</div>
+            <div style={{ fontSize: 12, color: '#8f9ba7' }}>completed this week</div>
+            <span
+              className="pill"
+              style={{
+                marginLeft: 'auto',
+                color: weekDelta > 0 ? 'var(--mint)' : weekDelta < 0 ? 'var(--rose)' : '#8f9ba7',
+                borderColor: weekDelta > 0 ? 'rgba(101,237,189,.3)' : weekDelta < 0 ? 'rgba(255,125,150,.3)' : 'var(--line)',
+              }}
+            >
+              {weekDelta > 0 ? `▲ +${weekDelta} vs last week` : weekDelta < 0 ? `▼ ${weekDelta} vs last week` : '— same as last week'}
+            </span>
+          </div>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 800, color: '#73818d', marginBottom: 10 }}>
+            Average time per stage
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {STAGES.filter((s) => s !== 'completed').map((s) => {
+              const d = stageDurations[s];
+              return (
+                <div key={s} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#dce4ea' }}>
+                  <span>{STAGE_LABELS[s]}</span>
+                  <span style={{ color: '#8f9ba7', fontFamily: 'ui-monospace, monospace' }}>{d.count ? fmtDuration(d.total / d.count) + ' avg' : '—'}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="glass card-block">
+          <h3 style={{ marginBottom: 4 }}>Overdue aging</h3>
+          <p className="sub" style={{ fontSize: 11.5, marginBottom: 16 }}>Sorted by how long they've been stuck — not just that they're late.</p>
+          {overdueAged.length ? overdueAged.map(({ t, days }: { t: Task; days: number }) => (
+            <div key={t.id} className="leverage-row">
+              <div>
+                <div className="leverage-title">{t.title}</div>
+                <div className="leverage-sub">
+                  <span style={{ color: days > 7 ? '#ff2d55' : days > 2 ? 'var(--amber)' : 'var(--rose)', fontWeight: 800 }}>
+                    {days} day{days !== 1 ? 's' : ''} overdue
+                  </span> · {STAGE_LABELS[t.status]} · {t.priority}
+                </div>
+              </div>
+              <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', flexShrink: 0 }} onClick={() => goToTasks({ kind: 'single', id: t.id })}>Open</button>
+            </div>
+          )) : <div className="empty">Nothing overdue right now.</div>}
         </div>
       </div>
 
@@ -885,6 +973,10 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
   const canGoBack = idx > 0;
   const canAdvance = idx < STAGES.length - 1;
   const isCritical = t.priority === 'critical' && t.status !== 'completed';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const daysOverdue = t.due_date && t.due_date < todayStr && t.status !== 'completed'
+    ? Math.floor((Date.now() - new Date(t.due_date).getTime()) / 86400000)
+    : 0;
 
   return (
     <div
@@ -896,6 +988,11 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="pill cat-pill">{t.category || 'Tasks'}</span>
         <span className={'pill prio-' + t.priority}>{t.priority}</span>
+        {daysOverdue > 0 && (
+          <span className="pill" style={{ color: daysOverdue > 7 ? '#ff2d55' : 'var(--rose)', borderColor: daysOverdue > 7 ? 'rgba(255,45,85,.4)' : 'rgba(255,125,150,.3)', fontWeight: 800 }}>
+            {daysOverdue}d overdue
+          </span>
+        )}
       </div>
       <strong className="w-title">{t.title}</strong>
       <div className="w-desc">{t.description}</div>
