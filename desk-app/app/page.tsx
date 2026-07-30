@@ -609,6 +609,13 @@ function Tasks({ role, tasks, updates, reload, toast }: any) {
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Moved to "${STAGE_LABELS[next]}"` });
     reload.loadTasks();
   }
+  async function moveToStage(id: string, targetStage: Stage) {
+    const t = tasks.find((x: Task) => x.id === id);
+    if (!t || t.status === targetStage) return;
+    await supabase.from('tasks').update({ status: targetStage }).eq('id', id);
+    await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Moved to "${STAGE_LABELS[targetStage]}"` });
+    reload.loadTasks();
+  }
   async function postUpdate(id: string, text: string) {
     if (!text.trim()) return;
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text });
@@ -627,19 +634,28 @@ function Tasks({ role, tasks, updates, reload, toast }: any) {
     <>
       <div className="eyebrow">{role === 'ea' ? 'Execute' : 'Oversight'}</div>
       <h2>{role === 'ea' ? 'Live execution pipeline.' : "Director's pipeline view."}</h2>
-      <p className="sub">{role === 'ea' ? 'Advance work through each stage as you go — set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
+      <p className="sub">{role === 'ea' ? 'Drag a card to move it — or use the buttons. Set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
 
       <div className="pipeline-board" style={{ marginTop: 22 }}>
         {STAGES.map((stage) => {
           const stageTasks = tasks.filter((t: Task) => t.status === stage);
           return (
-            <div className="pipeline-col" key={stage}>
+            <div
+              className="pipeline-col"
+              key={stage}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const id = e.dataTransfer.getData('text/plain');
+                if (id) moveToStage(id, stage);
+              }}
+            >
               <div className="pipeline-col-head">
                 <span>{STAGE_LABELS[stage]}</span>
                 <span className="pipeline-count">{stageTasks.length}</span>
               </div>
               <div className="pipeline-col-body">
-                {stageTasks.length === 0 && <div className="empty" style={{ padding: 16, fontSize: 11 }}>Nothing here</div>}
+                {stageTasks.length === 0 && <div className="empty" style={{ padding: 16, fontSize: 11 }}>Drop a card here</div>}
                 {stageTasks.map((t: Task) => (
                   <TaskCard
                     key={t.id}
@@ -672,7 +688,11 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
   const isCritical = t.priority === 'critical' && t.status !== 'completed';
 
   return (
-    <div className={'work' + (isCritical ? ' work-critical' : '')}>
+    <div
+      className={'work' + (isCritical ? ' work-critical' : '')}
+      draggable
+      onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
+    >
       <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="pill cat-pill">{t.category || 'Tasks'}</span>
         <span className={'pill prio-' + t.priority}>{t.priority}</span>
@@ -698,12 +718,14 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
 
       {showReminder && (
         <div className="reminder-form">
+          <label style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 800, color: '#5b656e', display: 'block', marginBottom: 6 }}>
+            Remind at
+          </label>
           <input
             type="datetime-local"
-            className="input"
+            className="reminder-input"
             value={remVal}
             onChange={(e) => setRemVal(e.target.value)}
-            style={{ fontSize: 11.5, padding: '8px 10px' }}
           />
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { setReminder(t.id, remVal ? new Date(remVal).toISOString() : null); setShowReminder(false); }}>Save</button>

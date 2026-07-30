@@ -138,6 +138,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
 .reminder-badge{margin-top:8px;display:inline-flex;align-items:center;gap:5px;background:rgba(169,156,255,.15);color:var(--violet);border:1px solid rgba(169,156,255,.3);border-radius:10px;padding:5px 9px;font-size:10.5px;font-weight:700;cursor:pointer;width:fit-content}
 .reminder-form{margin-top:10px;padding:10px;background:rgba(12,18,24,.04);border:1px solid rgba(12,18,24,.1);border-radius:12px}
+.reminder-input{width:100%;background:#ffffff;color:#111923;border:1.5px solid rgba(12,18,24,.2);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:inherit;color-scheme:light}
+.reminder-input:focus{outline:none;border-color:var(--violet)}
+.work{cursor:grab}
+.work:active{cursor:grabbing}
+.pipeline-col-body{min-height:60px}
 .work{background:#fbfaf7;border:1px solid var(--line-dark);border-radius:19px;padding:16px 18px;color:#0d1218}
 .work .w-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .work strong.w-title{display:block;font-size:14px;line-height:1.4;margin-bottom:6px}
