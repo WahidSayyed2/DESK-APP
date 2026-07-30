@@ -6,11 +6,14 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 type Role = 'director' | 'ea';
+type Category = 'Tasks' | 'Operations' | 'Development' | 'Cost Improvement';
+const CATEGORIES: Category[] = ['Tasks', 'Operations', 'Development', 'Cost Improvement'];
 type Task = {
   id: string;
   title: string;
   description: string | null;
-  priority: 'low' | 'medium' | 'high';
+  category: Category;
+  priority: 'low' | 'medium' | 'high' | 'critical';
   due_date: string | null;
   status: 'new' | 'progress' | 'done';
   created_by: string | null;
@@ -370,10 +373,10 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
   const done = tasks.filter((t: Task) => t.status === 'done').length;
   const progress = tasks.filter((t: Task) => t.status === 'progress').length;
   const fresh = tasks.filter((t: Task) => t.status === 'new').length;
-  const remaining = total - done;
-  const urgent = tasks.filter((t: Task) => t.priority === 'high' && t.status !== 'done').length;
+  const critical = tasks.filter((t: Task) => t.priority === 'critical' && t.status !== 'done').length;
   const today = new Date().toISOString().slice(0, 10);
   const overdue = tasks.filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'done').length;
+  const dueToday = tasks.filter((t: Task) => t.due_date === today && t.status !== 'done').length;
 
   const feed: { ts: number; who: string; text: string }[] = [];
   tasks.forEach((t: Task) => feed.push({ ts: new Date(t.created_at).getTime(), who: 'DIRECTOR', text: `New task assigned — "${t.title}"` }));
@@ -393,19 +396,34 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
         <Ring value={total} total={total || 1} color="var(--blue)" label="Total tasks" sub="All time" />
         <Ring value={fresh} total={total || 1} color="var(--rose)" label="Not picked up" sub="Needs action" onClick={() => setTab('tasks')} />
         <Ring value={progress} total={total || 1} color="var(--amber)" label="In progress" sub="Being worked on" onClick={() => setTab('tasks')} />
-        <Ring value={urgent} total={total || 1} color="#ff4d6d" label="Urgent" sub="High priority open" onClick={() => setTab('tasks')} />
+        <Ring value={critical} total={total || 1} color="#ff2d55" label="Critical" sub="Needs urgent attention" onClick={() => setTab('tasks')} />
         <Ring value={done} total={total || 1} color="var(--mint)" label="Completed" sub="Closed out" onClick={() => setTab('tasks')} />
       </div>
 
-      {overdue > 0 && (
-        <div className="glass card-block" style={{ marginBottom: 20, borderColor: 'rgba(255,125,150,.35)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="pill status-new">{overdue} overdue</span>
-            <span style={{ fontSize: 12.5, color: '#dce4ea' }}>You have {overdue} task{overdue > 1 ? 's' : ''} past their due date.</span>
-            <button className="tiny-btn" style={{ marginLeft: 'auto', background: '#0e151d', color: '#fff' }} onClick={() => setTab('tasks')}>Review →</button>
+      {(overdue > 0 || critical > 0 || dueToday > 0) && (
+        <div className="glass card-block alert-box" style={{ marginBottom: 20 }}>
+          <div className="alert-num">{overdue}</div>
+          <div className="alert-breakdown">
+            <div><span className="pill status-new">{overdue} overdue</span></div>
+            <div><span className="pill prio-critical">{critical} critical</span></div>
+            <div><span className="pill status-progress">{dueToday} due today</span></div>
           </div>
+          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff', marginLeft: 'auto' }} onClick={() => setTab('tasks')}>Review →</button>
         </div>
       )}
+
+      <div className="category-strip">
+        {CATEGORIES.map((c: Category, i: number) => {
+          const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'done').length;
+          return (
+            <button key={c} className="category-card" onClick={() => setTab('tasks')}>
+              <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
+              <span className="cc-name">{c}</span>
+              <span className="cc-count">{count} open</span>
+            </button>
+          );
+        })}
+      </div>
 
       <div className="grid-2">
         <div className="glass card-block">
@@ -447,7 +465,8 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
 // =========================================================
 function NewTask({ toast, reload }: any) {
   const [text, setText] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [category, setCategory] = useState<Category>('Tasks');
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
   const [dueDate, setDueDate] = useState('');
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -489,6 +508,7 @@ function NewTask({ toast, reload }: any) {
     const { error } = await supabase.from('tasks').insert({
       title: deriveTitle(text),
       description: text.trim(),
+      category,
       priority,
       due_date: dueDate || null,
       status: 'new',
@@ -496,7 +516,7 @@ function NewTask({ toast, reload }: any) {
     });
     setBusy(false);
     if (error) { toast('Could not save task: ' + error.message); return; }
-    setText(''); setPriority('medium'); setDueDate('');
+    setText(''); setCategory('Tasks'); setPriority('medium'); setDueDate('');
     toast('Task sent to the EA.');
     reload.loadTasks();
   }
@@ -513,11 +533,31 @@ function NewTask({ toast, reload }: any) {
           <button className="acid-btn" disabled={busy} onClick={createTask}>{busy ? 'Sending…' : 'Create task →'}</button>
         </div>
         {listening && <div style={{ fontSize: 11, color: '#8f9ba7', marginTop: 10 }}>Listening…</div>}
+
+        <div style={{ marginTop: 18 }}>
+          <label className="field-label">Category</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+            {CATEGORIES.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategory(c)}
+                className={category === c ? 'acid-btn' : 'soft-btn'}
+                style={{ padding: '8px 14px', fontSize: 11.5 }}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="form-grid" style={{ marginTop: 16, maxWidth: 460 }}>
           <div>
             <label className="field-label">Priority</label>
             <select className="select" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
-              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
             </select>
           </div>
           <div>
@@ -566,9 +606,13 @@ function TaskCard({ t, role, updates, setStatus, postUpdate }: any) {
   const [val, setVal] = useState('');
   const statusLabel: any = { new: 'New', progress: 'In progress', done: 'Done' };
   return (
-    <div className="work">
+    <div className={'work' + (t.priority === 'critical' && t.status !== 'done' ? ' work-critical' : '')}>
       <div className="w-top">
         <div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span className="pill cat-pill">{t.category || 'Tasks'}</span>
+            {t.priority === 'critical' && t.status !== 'done' && <span className="pill prio-critical">⚠ Critical</span>}
+          </div>
           <strong className="w-title">{t.title}</strong>
           <div className="w-desc">{t.description}</div>
         </div>
