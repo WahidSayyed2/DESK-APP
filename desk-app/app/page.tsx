@@ -25,11 +25,13 @@ type Task = {
 };
 type TaskUpdate = { id: string; task_id: string; by_role: Role; text: string; created_at: string };
 type Reminder = { id: string; owner_role: Role; text: string; freq: 'day' | 'week' | 'month'; created_at: string };
-type ChatMessage = { id: string; from_role: Role; text: string; created_at: string };
+type ChatMessage = { id: string; from_role: Role; text: string; created_at: string; attachment_url?: string | null; attachment_name?: string | null };
 type Notif = { id: string; recipient_role: Role; text: string; task_id: string | null; seen: boolean; created_at: string };
 type Profile = { id: string; role: Role; name: string };
 
-type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat';
+type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat' | 'attendance' | 'wishlist';
+type AttendanceRow = { id: string; role: Role; punch_in: string; punch_out: string | null; created_at: string };
+type WishlistItem = { id: string; text: string; added_by: Role; done: boolean; created_at: string };
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
@@ -45,6 +47,8 @@ export default function Home() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [unread, setUnread] = useState(0);
 
@@ -236,12 +240,53 @@ export default function Home() {
     loadNotifs();
   }
 
+  async function loadAttendance() {
+    const { data, error } = await supabase.from('attendance').select('*').order('punch_in', { ascending: false });
+    if (error) { console.error('loadAttendance failed:', error.message); return; }
+    if (data) setAttendance(data as AttendanceRow[]);
+  }
+  async function punchIn() {
+    if (!profile) return;
+    const { error } = await supabase.from('attendance').insert({ role: profile.role, punch_in: new Date().toISOString() });
+    if (error) { toast('⚠️ Punch in failed: ' + error.message); return; }
+    toast('Punched in.');
+    loadAttendance();
+  }
+  async function punchOut(id: string) {
+    const { error } = await supabase.from('attendance').update({ punch_out: new Date().toISOString() }).eq('id', id);
+    if (error) { toast('⚠️ Punch out failed: ' + error.message); return; }
+    toast('Punched out.');
+    loadAttendance();
+  }
+
+  async function loadWishlist() {
+    const { data, error } = await supabase.from('wishlist_items').select('*').order('created_at', { ascending: false });
+    if (error) { console.error('loadWishlist failed:', error.message); return; }
+    if (data) setWishlist(data as WishlistItem[]);
+  }
+  async function addWishlistItem(text: string) {
+    if (!profile || !text.trim()) return;
+    const { error } = await supabase.from('wishlist_items').insert({ text: text.trim(), added_by: profile.role });
+    if (error) { toast('⚠️ Could not add: ' + error.message); return; }
+    loadWishlist();
+  }
+  async function toggleWishlistItem(id: string, done: boolean) {
+    await supabase.from('wishlist_items').update({ done }).eq('id', id);
+    loadWishlist();
+  }
+  async function deleteWishlistItem(id: string) {
+    await supabase.from('wishlist_items').delete().eq('id', id);
+    loadWishlist();
+  }
+
   useEffect(() => {
     if (!profile) return;
     loadTasks();
     loadReminders();
     loadChat();
     loadNotifs();
+    loadAttendance();
+    loadWishlist();
     const lastRead = Number(localStorage.getItem('desk_notif_read_' + profile.role) || 0);
 
     const channel = supabase
@@ -251,6 +296,8 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => loadChat())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reminders' }, () => loadReminders())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => loadNotifs())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => loadAttendance())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wishlist_items' }, () => loadWishlist())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -327,6 +374,13 @@ export default function Home() {
         markNotifSeen={markNotifSeen}
         markAllNotifsSeen={markAllNotifsSeen}
         notifyRole={notifyRole}
+        attendance={attendance}
+        punchIn={punchIn}
+        punchOut={punchOut}
+        wishlist={wishlist}
+        addWishlistItem={addWishlistItem}
+        toggleWishlistItem={toggleWishlistItem}
+        deleteWishlistItem={deleteWishlistItem}
         profile={profile}
         toast={toast}
         reload={{ loadTasks, loadReminders, loadChat, loadNotifs }}
@@ -402,7 +456,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const navItems =
@@ -412,6 +466,8 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'newtask', label: 'Capture', ic: '✎' },
           { id: 'tasks', label: 'All Tasks', ic: '☰' },
           { id: 'reminders', label: 'Reminders', ic: '◷' },
+          { id: 'attendance', label: 'Attendance', ic: '🕐' },
+          { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
         ]
@@ -419,6 +475,8 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'overview', label: 'Dashboard', ic: '◈' },
           { id: 'tasks', label: 'My Tasks', ic: '☰', badge: true },
           { id: 'reminders', label: 'Reminders', ic: '◷' },
+          { id: 'attendance', label: 'Attendance', ic: '🕐' },
+          { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
         ];
@@ -496,6 +554,8 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
             {tab === 'ai' && <AIPortal role={role} />}
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
+            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} />}
+            {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
           </section>
         </main>
       </div>
@@ -1321,10 +1381,46 @@ function Reminders({ role, reminders, reload }: any) {
 // =========================================================
 // AI Portal
 // =========================================================
+// =========================================================
+// Shared speech-to-text hook — used by AI Portal and Chat
+// =========================================================
+function useSpeechToText(onResult: (text: string) => void) {
+  const recRef = useRef<any>(null);
+  const [listening, setListening] = useState(false);
+  const [supported, setSupported] = useState(false);
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    rec.onresult = (e: any) => {
+      let final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) final += e.results[i][0].transcript + ' ';
+      if (final) onResult(final);
+    };
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setSupported(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function toggle() {
+    if (!recRef.current) return;
+    if (listening) { recRef.current.stop(); setListening(false); }
+    else { recRef.current.start(); setListening(true); }
+  }
+
+  return { listening, toggle, supported };
+}
+
 function AIPortal({ role }: any) {
   const [history, setHistory] = useState<{ role: string; text: string }[]>([]);
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
+  const speech = useSpeechToText((text) => setInput((v) => (v + ' ' + text).trim()));
 
   async function send() {
     const text = input.trim();
@@ -1356,6 +1452,9 @@ function AIPortal({ role }: any) {
           {history.map((m, i) => <div key={i} className={'bubble ' + (m.role === 'user' ? 'user' : 'ai')}>{m.text}</div>)}
         </div>
         <div className="chat-compose">
+          {speech.supported && (
+            <button className={'mic-btn' + (speech.listening ? ' live' : '')} onClick={speech.toggle} title="Speak" style={{ width: 44, height: 44 }}>🎙️</button>
+          )}
           <input className="input" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the AI anything..." onKeyDown={(e) => e.key === 'Enter' && send()} />
           <button className="acid-btn" onClick={send}>Send</button>
         </div>
@@ -1369,7 +1468,10 @@ function AIPortal({ role }: any) {
 // =========================================================
 function Chat({ role, chat, reload }: any) {
   const [input, setInput] = useState('');
+  const [uploading, setUploading] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const speech = useSpeechToText((text) => setInput((v) => (v + ' ' + text).trim()));
 
   async function send() {
     const text = input.trim();
@@ -1378,7 +1480,36 @@ function Chat({ role, chat, reload }: any) {
     setInput('');
     reload.loadChat();
   }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const path = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+    const { error: upErr } = await supabase.storage.from('attachments').upload(path, file);
+    if (upErr) {
+      setUploading(false);
+      alert('Upload failed: ' + upErr.message);
+      return;
+    }
+    const { data: pub } = supabase.storage.from('attachments').getPublicUrl(path);
+    await supabase.from('chat_messages').insert({
+      from_role: role,
+      text: input.trim() || `📎 ${file.name}`,
+      attachment_url: pub.publicUrl,
+      attachment_name: file.name,
+    });
+    setInput('');
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = '';
+    reload.loadChat();
+  }
+
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [chat]);
+
+  function isImage(name?: string | null) {
+    return !!name && /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
+  }
 
   return (
     <>
@@ -1391,14 +1522,176 @@ function Chat({ role, chat, reload }: any) {
           {chat.map((m: ChatMessage) => (
             <div key={m.id} className={'bubble ' + (m.from_role === role ? 'user' : 'ai')}>
               {m.text}
+              {m.attachment_url && (
+                isImage(m.attachment_name) ? (
+                  <a href={m.attachment_url} target="_blank" rel="noreferrer"><img src={m.attachment_url} alt={m.attachment_name || 'attachment'} className="chat-attachment-img" /></a>
+                ) : (
+                  <a href={m.attachment_url} target="_blank" rel="noreferrer" className="chat-attachment-file">📎 {m.attachment_name || 'Download attachment'}</a>
+                )
+              )}
               <small>{m.from_role === 'director' ? 'Director' : 'EA'} · {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
             </div>
           ))}
         </div>
         <div className="chat-compose">
+          {speech.supported && (
+            <button className={'mic-btn' + (speech.listening ? ' live' : '')} onClick={speech.toggle} title="Speak" style={{ width: 44, height: 44 }}>🎙️</button>
+          )}
+          <button className="mic-btn" style={{ width: 44, height: 44 }} onClick={() => fileRef.current?.click()} title="Attach a file" disabled={uploading}>
+            {uploading ? '…' : '📎'}
+          </button>
+          <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={handleFile} />
           <input className="input" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type a message..." onKeyDown={(e) => e.key === 'Enter' && send()} />
           <button className="acid-btn" onClick={send}>Send</button>
         </div>
+      </div>
+    </>
+  );
+}
+
+// =========================================================
+// Attendance — punch in/out, daily log, monthly totals, CSV report
+// =========================================================
+function Attendance({ role, attendance, punchIn, punchOut }: any) {
+  const isEA = role === 'ea';
+  const eaRecords = (attendance || []).filter((a: AttendanceRow) => a.role === 'ea');
+  const myOpen = eaRecords.find((a: AttendanceRow) => !a.punch_out);
+  const now = Date.now();
+
+  function fmtHours(ms: number) {
+    return Math.max(0, ms / 3600000).toFixed(1) + 'h';
+  }
+  function dayTotalMs(records: AttendanceRow[]) {
+    return records.reduce((sum, r) => sum + ((r.punch_out ? new Date(r.punch_out).getTime() : now) - new Date(r.punch_in).getTime()), 0);
+  }
+
+  const byDate: Record<string, AttendanceRow[]> = {};
+  eaRecords.forEach((a: AttendanceRow) => {
+    const d = new Date(a.punch_in).toISOString().slice(0, 10);
+    (byDate[d] = byDate[d] || []).push(a);
+  });
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const monthStr = new Date().toISOString().slice(0, 7);
+  const todayTotal = byDate[todayStr] ? dayTotalMs(byDate[todayStr]) : 0;
+  const monthTotal = dates.filter((d) => d.startsWith(monthStr)).reduce((sum, d) => sum + dayTotalMs(byDate[d]), 0);
+
+  function exportCSV() {
+    const rows: string[][] = [['Date', 'Punch In', 'Punch Out', 'Hours']];
+    dates.forEach((d) => {
+      byDate[d].slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime()).forEach((r) => {
+        const ms = (r.punch_out ? new Date(r.punch_out).getTime() : now) - new Date(r.punch_in).getTime();
+        rows.push([d, new Date(r.punch_in).toLocaleTimeString(), r.punch_out ? new Date(r.punch_out).toLocaleTimeString() : 'Still in', fmtHours(ms)]);
+      });
+    });
+    const esc = (v: string) => `"${(v || '').replace(/"/g, '""')}"`;
+    const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attendance-${todayStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <>
+      <div className="eyebrow">Attendance</div>
+      <h2>{isEA ? 'Your attendance.' : "EA's attendance."}</h2>
+      <p className="sub">{isEA ? 'Punch in and out — the Director sees this in real time.' : "Live view of the EA's punch in/out log."}</p>
+
+      {isEA && (
+        <div className="glass hero" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11, color: '#8f9ba7', marginBottom: 6 }}>{myOpen ? 'Currently punched in since' : 'Not punched in'}</div>
+              <div style={{ fontSize: 26, fontWeight: 800 }}>{myOpen ? new Date(myOpen.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
+            </div>
+            <button className="acid-btn" style={{ marginLeft: 'auto' }} onClick={() => (myOpen ? punchOut(myOpen.id) : punchIn())}>
+              {myOpen ? 'Punch Out' : 'Punch In'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="kpi-strip">
+        <div className="kpi"><small>Today</small><strong>{fmtHours(todayTotal)}</strong><span>worked so far</span></div>
+        <div className="kpi"><small>This month</small><strong>{fmtHours(monthTotal)}</strong><span>total hours</span></div>
+      </div>
+
+      <div className="glass card-block">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Daily log</h3>
+          <button className="soft-btn" onClick={exportCSV}>⬇ Download report</button>
+        </div>
+        {dates.length ? dates.map((d) => {
+          const records = byDate[d].slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
+          const first = records[0];
+          const last = records[records.length - 1];
+          return (
+            <div key={d} className="leverage-row">
+              <div>
+                <div className="leverage-title">{new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                <div className="leverage-sub">In {new Date(first.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Out {last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Still in'}</div>
+              </div>
+              <b style={{ flexShrink: 0 }}>{fmtHours(dayTotalMs(records))}</b>
+            </div>
+          );
+        }) : <div className="empty">No attendance recorded yet.</div>}
+      </div>
+    </>
+  );
+}
+
+// =========================================================
+// Wishlist — shared between Director and EA
+// =========================================================
+function Wishlist({ role, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem }: any) {
+  const [text, setText] = useState('');
+  const pending = (wishlist || []).filter((w: WishlistItem) => !w.done);
+  const done = (wishlist || []).filter((w: WishlistItem) => w.done);
+
+  function submit() {
+    if (!text.trim()) return;
+    addWishlistItem(text);
+    setText('');
+  }
+
+  return (
+    <>
+      <div className="eyebrow">Shared</div>
+      <h2>My wishlist.</h2>
+      <p className="sub">Anything either of you wants to add — visible to both desks.</p>
+      <div className="glass hero" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Add something to the wishlist..." onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          <button className="acid-btn" style={{ flexShrink: 0 }} onClick={submit}>Add</button>
+        </div>
+      </div>
+      <div className="glass card-block">
+        <h3 style={{ marginBottom: 14 }}>Pending ({pending.length})</h3>
+        {pending.length ? pending.map((w: WishlistItem) => (
+          <div key={w.id} className="rem-item">
+            <span onClick={() => toggleWishlistItem(w.id, true)} style={{ cursor: 'pointer', flex: 1 }}>
+              ☐ {w.text} <span style={{ color: '#73818d', fontSize: 10 }}>— added by {w.added_by === 'director' ? 'Director' : 'EA'}</span>
+            </span>
+            <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
+          </div>
+        )) : <div className="empty">Nothing pending.</div>}
+        {done.length > 0 && (
+          <>
+            <h3 style={{ margin: '22px 0 14px' }}>Done ({done.length})</h3>
+            {done.map((w: WishlistItem) => (
+              <div key={w.id} className="rem-item" style={{ opacity: .55 }}>
+                <span onClick={() => toggleWishlistItem(w.id, false)} style={{ cursor: 'pointer', flex: 1, textDecoration: 'line-through' }}>☑ {w.text}</span>
+                <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </>
   );
