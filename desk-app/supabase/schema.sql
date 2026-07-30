@@ -20,7 +20,8 @@ create table if not exists tasks (
   category text not null default 'Tasks' check (category in ('Tasks','Operations','Development','Cost Improvement')),
   priority text not null default 'medium' check (priority in ('low','medium','high','critical')),
   due_date date,
-  status text not null default 'new' check (status in ('new','progress','done')),
+  reminder_at timestamptz,
+  status text not null default 'captured' check (status in ('captured','progress','followup','update','closure','completed')),
   created_by uuid references profiles(id),
   created_at timestamptz not null default now()
 );

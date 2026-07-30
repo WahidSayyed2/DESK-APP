@@ -8,6 +8,9 @@ import { supabase } from '../lib/supabaseClient';
 type Role = 'director' | 'ea';
 type Category = 'Tasks' | 'Operations' | 'Development' | 'Cost Improvement';
 const CATEGORIES: Category[] = ['Tasks', 'Operations', 'Development', 'Cost Improvement'];
+type Stage = 'captured' | 'progress' | 'followup' | 'update' | 'closure' | 'completed';
+const STAGES: Stage[] = ['captured', 'progress', 'followup', 'update', 'closure', 'completed'];
+const STAGE_LABELS: Record<Stage, string> = { captured: 'Captured', progress: 'In Progress', followup: 'Follow-up', update: 'Update', closure: 'Closure', completed: 'Completed' };
 type Task = {
   id: string;
   title: string;
@@ -15,7 +18,8 @@ type Task = {
   category: Category;
   priority: 'low' | 'medium' | 'high' | 'critical';
   due_date: string | null;
-  status: 'new' | 'progress' | 'done';
+  reminder_at: string | null;
+  status: Stage;
   created_by: string | null;
   created_at: string;
 };
@@ -183,6 +187,27 @@ export default function Home() {
     const lastRead = Number(localStorage.getItem('desk_notif_read_ea') || 0);
     const n = tasks.filter((t) => new Date(t.created_at).getTime() > lastRead).length;
     setUnread(n);
+  }, [tasks, profile]);
+
+  // per-task reminders: fire a real notification the moment a reminder time arrives
+  const firedReminders = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!profile) return;
+    const check = () => {
+      const now = Date.now();
+      tasks.forEach((t) => {
+        if (!t.reminder_at) return;
+        const due = new Date(t.reminder_at).getTime();
+        if (due <= now && due > now - 5 * 60 * 1000 && !firedReminders.current.has(t.id + t.reminder_at)) {
+          firedReminders.current.add(t.id + t.reminder_at);
+          pushNotify('⏰ Reminder', t.title);
+        }
+      });
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, profile]);
 
   function markTasksRead() {
@@ -370,13 +395,13 @@ function Ring({ value, total, color, label, sub, onClick }: any) {
 // =========================================================
 function Dashboard({ role, tasks, updates, setTab, unread }: any) {
   const total = tasks.length;
-  const done = tasks.filter((t: Task) => t.status === 'done').length;
-  const progress = tasks.filter((t: Task) => t.status === 'progress').length;
-  const fresh = tasks.filter((t: Task) => t.status === 'new').length;
-  const critical = tasks.filter((t: Task) => t.priority === 'critical' && t.status !== 'done').length;
+  const done = tasks.filter((t: Task) => t.status === 'completed').length;
+  const progress = tasks.filter((t: Task) => !['captured', 'completed'].includes(t.status)).length;
+  const fresh = tasks.filter((t: Task) => t.status === 'captured').length;
+  const critical = tasks.filter((t: Task) => t.priority === 'critical' && t.status !== 'completed').length;
   const today = new Date().toISOString().slice(0, 10);
-  const overdue = tasks.filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'done').length;
-  const dueToday = tasks.filter((t: Task) => t.due_date === today && t.status !== 'done').length;
+  const overdue = tasks.filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'completed').length;
+  const dueToday = tasks.filter((t: Task) => t.due_date === today && t.status !== 'completed').length;
 
   const feed: { ts: number; who: string; text: string }[] = [];
   tasks.forEach((t: Task) => feed.push({ ts: new Date(t.created_at).getTime(), who: 'DIRECTOR', text: `New task assigned — "${t.title}"` }));
@@ -404,7 +429,7 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
         <div className="glass card-block alert-box" style={{ marginBottom: 20 }}>
           <div className="alert-num">{overdue}</div>
           <div className="alert-breakdown">
-            <div><span className="pill status-new">{overdue} overdue</span></div>
+            <div><span className="pill status-captured">{overdue} overdue</span></div>
             <div><span className="pill prio-critical">{critical} critical</span></div>
             <div><span className="pill status-progress">{dueToday} due today</span></div>
           </div>
@@ -414,7 +439,7 @@ function Dashboard({ role, tasks, updates, setTab, unread }: any) {
 
       <div className="category-strip">
         {CATEGORIES.map((c: Category, i: number) => {
-          const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'done').length;
+          const count = tasks.filter((t: Task) => (t.category || 'Tasks') === c && t.status !== 'completed').length;
           return (
             <button key={c} className="category-card" onClick={() => setTab('tasks')}>
               <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
@@ -511,7 +536,7 @@ function NewTask({ toast, reload }: any) {
       category,
       priority,
       due_date: dueDate || null,
-      status: 'new',
+      status: 'captured',
       created_by: userData.user?.id,
     });
     setBusy(false);
@@ -571,79 +596,133 @@ function NewTask({ toast, reload }: any) {
 }
 
 // =========================================================
-// Tasks list
+// Tasks — kanban pipeline (Captured -> Progress -> Follow-up -> Update -> Closure -> Completed)
 // =========================================================
 function Tasks({ role, tasks, updates, reload, toast }: any) {
-  async function setStatus(id: string, status: string) {
-    await supabase.from('tasks').update({ status }).eq('id', id);
-    await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Status changed to "${status === 'progress' ? 'In progress' : status}"` });
+  async function moveStage(id: string, dir: 1 | -1) {
+    const t = tasks.find((x: Task) => x.id === id);
+    if (!t) return;
+    const idx = STAGES.indexOf(t.status);
+    const next = STAGES[idx + dir];
+    if (!next) return;
+    await supabase.from('tasks').update({ status: next }).eq('id', id);
+    await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Moved to "${STAGE_LABELS[next]}"` });
     reload.loadTasks();
   }
-  async function postUpdate(id: string, text: string, wasNew: boolean) {
+  async function postUpdate(id: string, text: string) {
     if (!text.trim()) return;
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text });
-    if (wasNew) await supabase.from('tasks').update({ status: 'progress' }).eq('id', id);
+    const t = tasks.find((x: Task) => x.id === id);
+    if (t && t.status === 'captured') await supabase.from('tasks').update({ status: 'progress' }).eq('id', id);
     reload.loadTasks();
     toast('Update posted — Director will see it live.');
+  }
+  async function setReminder(id: string, when: string | null) {
+    await supabase.from('tasks').update({ reminder_at: when }).eq('id', id);
+    reload.loadTasks();
+    toast(when ? 'Reminder set for this task.' : 'Reminder removed.');
   }
 
   return (
     <>
       <div className="eyebrow">{role === 'ea' ? 'Execute' : 'Oversight'}</div>
-      <h2>{role === 'ea' ? 'My tasks.' : 'All tasks.'}</h2>
-      <p className="sub">{role === 'ea' ? 'Pick up new work and post updates as you go.' : 'Everything assigned to the EA, with live status.'}</p>
-      <div className="task-list" style={{ marginTop: 22 }}>
-        {!tasks.length && <div className="empty">No tasks yet.</div>}
-        {tasks.map((t: Task) => (
-          <TaskCard key={t.id} t={t} role={role} updates={updates.filter((u: TaskUpdate) => u.task_id === t.id)} setStatus={setStatus} postUpdate={postUpdate} />
-        ))}
+      <h2>{role === 'ea' ? 'Live execution pipeline.' : "Director's pipeline view."}</h2>
+      <p className="sub">{role === 'ea' ? 'Advance work through each stage as you go — set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
+
+      <div className="pipeline-board" style={{ marginTop: 22 }}>
+        {STAGES.map((stage) => {
+          const stageTasks = tasks.filter((t: Task) => t.status === stage);
+          return (
+            <div className="pipeline-col" key={stage}>
+              <div className="pipeline-col-head">
+                <span>{STAGE_LABELS[stage]}</span>
+                <span className="pipeline-count">{stageTasks.length}</span>
+              </div>
+              <div className="pipeline-col-body">
+                {stageTasks.length === 0 && <div className="empty" style={{ padding: 16, fontSize: 11 }}>Nothing here</div>}
+                {stageTasks.map((t: Task) => (
+                  <TaskCard
+                    key={t.id}
+                    t={t}
+                    role={role}
+                    stage={stage}
+                    updates={updates.filter((u: TaskUpdate) => u.task_id === t.id)}
+                    moveStage={moveStage}
+                    postUpdate={postUpdate}
+                    setReminder={setReminder}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </>
   );
 }
 
-function TaskCard({ t, role, updates, setStatus, postUpdate }: any) {
+function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder }: any) {
   const [val, setVal] = useState('');
-  const statusLabel: any = { new: 'New', progress: 'In progress', done: 'Done' };
+  const [showUpdates, setShowUpdates] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
+  const [remVal, setRemVal] = useState(t.reminder_at ? t.reminder_at.slice(0, 16) : '');
+  const idx = STAGES.indexOf(stage);
+  const canGoBack = idx > 0;
+  const canAdvance = idx < STAGES.length - 1;
+  const isCritical = t.priority === 'critical' && t.status !== 'completed';
+
   return (
-    <div className={'work' + (t.priority === 'critical' && t.status !== 'done' ? ' work-critical' : '')}>
-      <div className="w-top">
-        <div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-            <span className="pill cat-pill">{t.category || 'Tasks'}</span>
-            {t.priority === 'critical' && t.status !== 'done' && <span className="pill prio-critical">⚠ Critical</span>}
-          </div>
-          <strong className="w-title">{t.title}</strong>
-          <div className="w-desc">{t.description}</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
-          <span className={'pill status-' + t.status}>{statusLabel[t.status]}</span>
-          <span className={'pill prio-' + t.priority}>{t.priority}</span>
-        </div>
+    <div className={'work' + (isCritical ? ' work-critical' : '')}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className="pill cat-pill">{t.category || 'Tasks'}</span>
+        <span className={'pill prio-' + t.priority}>{t.priority}</span>
       </div>
-      <div className="w-meta">
+      <strong className="w-title">{t.title}</strong>
+      <div className="w-desc">{t.description}</div>
+      <div className="w-meta" style={{ marginTop: 8 }}>
         <span className="w-due">{t.due_date ? 'DUE ' + t.due_date : 'NO DUE DATE'}</span>
-        <div className="actions-row" style={{ marginLeft: 'auto' }}>
-          {role === 'ea' && t.status !== 'done' && (
-            <>
-              {t.status === 'new' && <button className="tiny-btn" onClick={() => setStatus(t.id, 'progress')}>Start</button>}
-              <button className="tiny-btn" onClick={() => setStatus(t.id, 'done')}>Mark done</button>
-            </>
-          )}
-          {role === 'director' && t.status === 'done' && <button className="tiny-btn" onClick={() => setStatus(t.id, 'progress')}>Reopen</button>}
+      </div>
+
+      {t.reminder_at && (
+        <div className="reminder-badge" onClick={() => setShowReminder((s) => !s)}>
+          ⏰ {new Date(t.reminder_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </div>
+      )}
+
+      <div className="actions-row" style={{ marginTop: 10 }}>
+        {canGoBack && <button className="tiny-btn" onClick={() => moveStage(t.id, -1)}>← Back</button>}
+        {canAdvance && <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => moveStage(t.id, 1)}>Advance →</button>}
+        <button className="tiny-btn" onClick={() => setShowReminder((s) => !s)}>⏰ Remind</button>
+        <button className="tiny-btn" onClick={() => setShowUpdates((s) => !s)}>💬 {updates.length}</button>
       </div>
-      <div className="w-updates">
-        {updates.length ? updates.map((u: TaskUpdate) => (
-          <div className="upd-line" key={u.id}><b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text} <span style={{ color: '#9aa2a9' }}>· {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
-        )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No updates yet.</div>}
-        {role === 'ea' && (
-          <div className="upd-form">
-            <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Post an update on this task..." onKeyDown={(e) => { if (e.key === 'Enter') { postUpdate(t.id, val, t.status === 'new'); setVal(''); } }} />
-            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { postUpdate(t.id, val, t.status === 'new'); setVal(''); }}>Post</button>
+
+      {showReminder && (
+        <div className="reminder-form">
+          <input
+            type="datetime-local"
+            className="input"
+            value={remVal}
+            onChange={(e) => setRemVal(e.target.value)}
+            style={{ fontSize: 11.5, padding: '8px 10px' }}
+          />
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { setReminder(t.id, remVal ? new Date(remVal).toISOString() : null); setShowReminder(false); }}>Save</button>
+            {t.reminder_at && <button className="tiny-btn" onClick={() => { setReminder(t.id, null); setRemVal(''); setShowReminder(false); }}>Clear</button>}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {showUpdates && (
+        <div className="w-updates">
+          {updates.length ? updates.map((u: TaskUpdate) => (
+            <div className="upd-line" key={u.id}><b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text} <span style={{ color: '#9aa2a9' }}>· {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
+          )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No updates yet.</div>}
+          <div className="upd-form">
+            <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Post an update..." onKeyDown={(e) => { if (e.key === 'Enter') { postUpdate(t.id, val); setVal(''); } }} />
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { postUpdate(t.id, val); setVal(''); }}>Post</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
