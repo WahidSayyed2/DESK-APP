@@ -870,27 +870,50 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
     toast(when ? 'Reminder set for this task.' : 'Reminder removed.');
   }
 
-  // ---- single-task focus: show just that one card, nothing else ----
+  function exportCSV() {
+    const rows: string[][] = [['Timestamp', 'Task', 'Category', 'Priority', 'Event', 'Details']];
+    const events: { ts: number; row: string[] }[] = [];
+    tasks.forEach((t: Task) => {
+      events.push({
+        ts: new Date(t.created_at).getTime(),
+        row: [t.created_at, t.title, t.category || 'Tasks', t.priority, 'Task created', t.description || ''],
+      });
+      updates.filter((u: TaskUpdate) => u.task_id === t.id).forEach((u: TaskUpdate) => {
+        events.push({
+          ts: new Date(u.created_at).getTime(),
+          row: [u.created_at, t.title, t.category || 'Tasks', t.priority, u.by_role === 'ea' ? 'EA update' : 'Director update', u.text],
+        });
+      });
+    });
+    events.sort((a, b) => a.ts - b.ts);
+    events.forEach((e) => rows.push(e.row));
+
+    const esc = (v: string) => `"${(v || '').replace(/"/g, '""')}"`;
+    const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `the-desk-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Exported — check your downloads.');
+  }
+
+  // ---- single-task focus: full detail, everything visible, nothing hidden ----
   if (focus?.kind === 'single') {
     const t = tasks.find((x: Task) => x.id === focus.id);
+    const tUpdates = t ? updates.filter((u: TaskUpdate) => u.task_id === t.id).sort((a: TaskUpdate, b: TaskUpdate) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : [];
     return (
       <>
         <div className="eyebrow">Focused view</div>
-        <h2>One task.</h2>
-        <p className="sub">Just this card — nothing else on the board.</p>
+        <h2>Full task detail.</h2>
+        <p className="sub">Everything about this card — nothing hidden.</p>
         <button className="soft-btn" style={{ marginBottom: 18 }} onClick={() => setFocus(null)}>← Back to full pipeline</button>
         {t ? (
-          <div style={{ maxWidth: 420 }}>
-            <TaskCard
-              t={t}
-              role={role}
-              stage={t.status}
-              updates={updates.filter((u: TaskUpdate) => u.task_id === t.id)}
-              moveStage={moveStage}
-              postUpdate={postUpdate}
-              setReminder={setReminder}
-            />
-          </div>
+          <TaskDetail t={t} role={role} tUpdates={tUpdates} moveStage={moveStage} postUpdate={postUpdate} setReminder={setReminder} />
         ) : <div className="empty">That task isn't around anymore.</div>}
       </>
     );
@@ -912,9 +935,18 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
 
   return (
     <>
-      <div className="eyebrow">{role === 'ea' ? 'Execute' : 'Oversight'}</div>
-      <h2>{role === 'ea' ? 'Live execution pipeline.' : "Director's pipeline view."}</h2>
-      <p className="sub">{role === 'ea' ? 'Drag a card to move it — or use the buttons. Set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div className="eyebrow">{role === 'ea' ? 'Execute' : 'Oversight'}</div>
+          <h2>{role === 'ea' ? 'Live execution pipeline.' : "Director's pipeline view."}</h2>
+          <p className="sub">{role === 'ea' ? 'Drag a card to move it — or use the buttons. Set reminders on anything time-sensitive.' : 'Everything the EA is executing, stage by stage.'}</p>
+        </div>
+        {role === 'director' && (
+          <button className="soft-btn" onClick={exportCSV} title="Download every task and update with exact timestamps">
+            ⬇ Export activity log
+          </button>
+        )}
+      </div>
 
       {focus?.kind === 'ring' && (
         <div className="filter-bar">
@@ -961,6 +993,72 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
         })}
       </div>
     </>
+  );
+}
+
+// =========================================================
+// TaskDetail — the full, nothing-hidden view of a single task
+// =========================================================
+function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder }: { t: Task; role: Role; tUpdates: TaskUpdate[]; moveStage: any; postUpdate: any; setReminder: any }) {
+  const [val, setVal] = useState('');
+  const [remVal, setRemVal] = useState(t.reminder_at ? t.reminder_at.slice(0, 16) : '');
+  const idx = STAGES.indexOf(t.status);
+  const canGoBack = idx > 0;
+  const canAdvance = idx < STAGES.length - 1;
+  const isCritical = t.priority === 'critical' && t.status !== 'completed';
+  const today = new Date().toISOString().slice(0, 10);
+  const daysOverdue = t.due_date && t.due_date < today && t.status !== 'completed' ? Math.floor((Date.now() - new Date(t.due_date).getTime()) / 86400000) : 0;
+
+  return (
+    <div className="paper card-block" style={{ maxWidth: 640 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className="pill cat-pill">{t.category || 'Tasks'}</span>
+        <span className={'pill prio-' + t.priority}>{t.priority}</span>
+        <span className={'pill status-' + t.status}>{STAGE_LABELS[t.status]}</span>
+        {daysOverdue > 0 && <span className="pill" style={{ color: '#ff2d55', borderColor: 'rgba(255,45,85,.4)', fontWeight: 800 }}>{daysOverdue}d overdue</span>}
+      </div>
+      <h3 style={{ fontSize: 24, marginBottom: 10 }}>{t.title}</h3>
+      <p style={{ fontSize: 13.5, color: '#4a545c', lineHeight: 1.6, marginBottom: 16 }}>{t.description || 'No description.'}</p>
+
+      <div className="form-grid" style={{ marginBottom: 18 }}>
+        <div>
+          <label className="field-label">Due date</label>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{t.due_date || 'Not set'}</div>
+        </div>
+        <div>
+          <label className="field-label">Reminder</label>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{t.reminder_at ? new Date(t.reminder_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'None set'}</div>
+        </div>
+      </div>
+
+      <div className="actions-row" style={{ marginBottom: 18 }}>
+        {canGoBack && <button className="tiny-btn" onClick={() => moveStage(t.id, -1)}>← Back a stage</button>}
+        {canAdvance && <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => moveStage(t.id, 1)}>Advance →</button>}
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <label className="field-label">Remind at</label>
+        <input type="datetime-local" className="reminder-input" value={remVal} onChange={(e) => setRemVal(e.target.value)} />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => setReminder(t.id, remVal ? new Date(remVal).toISOString() : null)}>Save reminder</button>
+          {t.reminder_at && <button className="tiny-btn" onClick={() => { setReminder(t.id, null); setRemVal(''); }}>Clear reminder</button>}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid rgba(12,18,24,.1)', paddingTop: 16 }}>
+        <label className="field-label" style={{ marginBottom: 10 }}>Full activity timeline ({tUpdates.length})</label>
+        {tUpdates.length ? tUpdates.map((u: TaskUpdate) => (
+          <div className="upd-line" key={u.id} style={{ marginBottom: 8 }}>
+            <b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text}
+            <span style={{ color: '#9aa2a9' }}> · {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No activity yet.</div>}
+        <div className="upd-form" style={{ marginTop: 12 }}>
+          <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Post an update..." onKeyDown={(e) => { if (e.key === 'Enter') { postUpdate(t.id, val); setVal(''); } }} />
+          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { postUpdate(t.id, val); setVal(''); }}>Post</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
