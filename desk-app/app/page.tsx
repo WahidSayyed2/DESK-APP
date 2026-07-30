@@ -111,7 +111,7 @@ export default function Home() {
   useEffect(() => {
     if (profile && !initialTabSet.current) {
       initialTabSet.current = true;
-      setTab(profile.role === 'ea' ? 'tasks' : 'overview');
+      setTab('overview');
     }
   }, [profile]);
 
@@ -272,63 +272,64 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
   const navItems =
     role === 'director'
       ? [
-          { id: 'overview', label: 'Overview' },
-          { id: 'newtask', label: 'Capture' },
-          { id: 'tasks', label: 'All Tasks' },
-          { id: 'reminders', label: 'Reminders' },
-          { id: 'ai', label: 'AI' },
-          { id: 'chat', label: 'Chat' },
+          { id: 'overview', label: 'Dashboard', ic: '◈' },
+          { id: 'newtask', label: 'Capture', ic: '✎' },
+          { id: 'tasks', label: 'All Tasks', ic: '☰' },
+          { id: 'reminders', label: 'Reminders', ic: '◷' },
+          { id: 'ai', label: 'AI', ic: '✦' },
+          { id: 'chat', label: 'Chat', ic: '✉' },
         ]
       : [
-          { id: 'tasks', label: 'My Tasks', badge: true },
-          { id: 'reminders', label: 'Reminders' },
-          { id: 'ai', label: 'AI' },
-          { id: 'chat', label: 'Chat' },
+          { id: 'overview', label: 'Dashboard', ic: '◈' },
+          { id: 'tasks', label: 'My Tasks', ic: '☰', badge: true },
+          { id: 'reminders', label: 'Reminders', ic: '◷' },
+          { id: 'ai', label: 'AI', ic: '✦' },
+          { id: 'chat', label: 'Chat', ic: '✉' },
         ];
 
   const statusLabel = notifPermission === 'granted' ? 'Notifications on' : notifPermission === 'denied' ? 'Notifications blocked' : 'Notifications off';
   const statusColor = notifPermission === 'granted' ? 'var(--mint)' : notifPermission === 'denied' ? 'var(--rose)' : 'var(--amber)';
 
   return (
-    <div>
-      <header className="top">
-        <div className="brand"><div className="brandmark">D</div> THE DESK / EXECUTION</div>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><div className="brandmark">D</div> THE DESK</div>
         <nav className="nav">
           {navItems.map((item: any) => (
             <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
-              <span>{item.label}</span>
+              <span>{item.ic}</span><span>{item.label}</span>
               {item.badge && unread > 0 && <span className="badge">{unread}</span>}
             </button>
           ))}
         </nav>
-        <div className="top-actions">
+        <div className="sidebar-foot">
           <span className="pill" style={{ color: statusColor, borderColor: statusColor }} title="This is a per-browser setting — shared across every tab/login using this browser">
             <i className="dot" style={{ background: statusColor, boxShadow: 'none' }} /> {statusLabel}
           </span>
-          {notifPermission !== 'granted' && (
-            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>
-              Enable
-            </button>
-          )}
-          {notifPermission === 'granted' && (
-            <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>
-              Send test
-            </button>
-          )}
+          <div className="top-actions">
+            {notifPermission !== 'granted' && (
+              <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>Enable notifications</button>
+            )}
+            {notifPermission === 'granted' && (
+              <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>Send test</button>
+            )}
+          </div>
           <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
           <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
         </div>
-      </header>
-      <main>
-        <section className="section">
-          {tab === 'overview' && <Overview tasks={tasks} updates={updates} setTab={setTab} />}
-          {tab === 'newtask' && <NewTask toast={toast} reload={reload} />}
-          {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} />}
-          {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
-          {tab === 'ai' && <AIPortal role={role} />}
-          {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
-        </section>
-      </main>
+      </aside>
+      <div className="main-content">
+        <main>
+          <section className="section">
+            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} unread={unread} />}
+            {tab === 'newtask' && <NewTask toast={toast} reload={reload} />}
+            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} />}
+            {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
+            {tab === 'ai' && <AIPortal role={role} />}
+            {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
+          </section>
+        </main>
+      </div>
       <div className="toast-stack">
         {toasts.map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>
@@ -337,13 +338,42 @@ function Shell({ role, tab, setTab, unread, onLogout, tasks, updates, reminders,
 }
 
 // =========================================================
-// Overview
+// Ring stat (circular progress) — small reusable SVG component
 // =========================================================
-function Overview({ tasks, updates, setTab }: any) {
+function Ring({ value, total, color, label, sub, onClick }: any) {
+  const size = 104, stroke = 9, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  const pct = total > 0 ? Math.min(1, value / total) : 0;
+  const offset = c * (1 - pct);
+  return (
+    <div className={'ring-card' + (onClick ? ' clickable' : '')} onClick={onClick}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,.08)" strokeWidth={stroke} fill="none" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
+          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ transition: 'stroke-dashoffset .6s ease' }}
+        />
+        <text x="50%" y="50%" textAnchor="middle" dy="0.35em" fontSize="26" fontWeight="800" fill="#fff">{value}</text>
+      </svg>
+      <div className="ring-label">{label}</div>
+      {sub && <div className="ring-sub">{sub}</div>}
+    </div>
+  );
+}
+
+// =========================================================
+// Dashboard — shared landing page for both Director and EA
+// =========================================================
+function Dashboard({ role, tasks, updates, setTab, unread }: any) {
   const total = tasks.length;
   const done = tasks.filter((t: Task) => t.status === 'done').length;
   const progress = tasks.filter((t: Task) => t.status === 'progress').length;
   const fresh = tasks.filter((t: Task) => t.status === 'new').length;
+  const remaining = total - done;
+  const urgent = tasks.filter((t: Task) => t.priority === 'high' && t.status !== 'done').length;
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = tasks.filter((t: Task) => t.due_date && t.due_date < today && t.status !== 'done').length;
 
   const feed: { ts: number; who: string; text: string }[] = [];
   tasks.forEach((t: Task) => feed.push({ ts: new Date(t.created_at).getTime(), who: 'DIRECTOR', text: `New task assigned — "${t.title}"` }));
@@ -356,14 +386,27 @@ function Overview({ tasks, updates, setTab }: any) {
   return (
     <>
       <div className="eyebrow">Command</div>
-      <h2>Director's overview.</h2>
-      <p className="sub">Everything the EA is executing, live — no need to ask.</p>
-      <div className="kpi-strip">
-        <div className="kpi"><small>Total tasks</small><strong>{total}</strong><span>All time</span></div>
-        <div className="kpi"><small>Awaiting pickup</small><strong style={{ color: 'var(--rose)' }}>{fresh}</strong><span>Needs EA action</span></div>
-        <div className="kpi"><small>In progress</small><strong style={{ color: 'var(--amber)' }}>{progress}</strong><span>Being worked on</span></div>
-        <div className="kpi"><small>Completed</small><strong style={{ color: 'var(--mint)' }}>{done}</strong><span>Closed out</span></div>
+      <h2>{role === 'director' ? "Director's dashboard." : 'Your dashboard.'}</h2>
+      <p className="sub">{role === 'director' ? 'Everything the EA is executing, live — no need to ask.' : 'Everything on your plate, at a glance.'}</p>
+
+      <div className="ring-strip">
+        <Ring value={total} total={total || 1} color="var(--blue)" label="Total tasks" sub="All time" />
+        <Ring value={fresh} total={total || 1} color="var(--rose)" label="Not picked up" sub="Needs action" onClick={() => setTab('tasks')} />
+        <Ring value={progress} total={total || 1} color="var(--amber)" label="In progress" sub="Being worked on" onClick={() => setTab('tasks')} />
+        <Ring value={urgent} total={total || 1} color="#ff4d6d" label="Urgent" sub="High priority open" onClick={() => setTab('tasks')} />
+        <Ring value={done} total={total || 1} color="var(--mint)" label="Completed" sub="Closed out" onClick={() => setTab('tasks')} />
       </div>
+
+      {overdue > 0 && (
+        <div className="glass card-block" style={{ marginBottom: 20, borderColor: 'rgba(255,125,150,.35)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="pill status-new">{overdue} overdue</span>
+            <span style={{ fontSize: 12.5, color: '#dce4ea' }}>You have {overdue} task{overdue > 1 ? 's' : ''} past their due date.</span>
+            <button className="tiny-btn" style={{ marginLeft: 'auto', background: '#0e151d', color: '#fff' }} onClick={() => setTab('tasks')}>Review →</button>
+          </div>
+        </div>
+      )}
+
       <div className="grid-2">
         <div className="glass card-block">
           <h3>Activity feed</h3>
@@ -374,13 +417,25 @@ function Overview({ tasks, updates, setTab }: any) {
                 <div className="f-who">{f.who}</div>
                 <div className="f-text">{f.text}</div>
               </div>
-            )) : <div className="empty">No activity yet. Capture your first task.</div>}
+            )) : <div className="empty">No activity yet.</div>}
           </div>
         </div>
         <div className="glass card-block">
-          <h3>Quick capture</h3>
-          <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Type or speak — it becomes a task instantly, no AI in between.</p>
-          <button className="acid-btn" style={{ width: '100%' }} onClick={() => setTab('newtask')}>Open capture tool →</button>
+          {role === 'director' ? (
+            <>
+              <h3>Quick capture</h3>
+              <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Type or speak — it becomes a task instantly, no AI in between.</p>
+              <button className="acid-btn" style={{ width: '100%' }} onClick={() => setTab('newtask')}>Open capture tool →</button>
+            </>
+          ) : (
+            <>
+              <h3>Ready to work</h3>
+              <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>
+                {unread > 0 ? `${unread} new task${unread > 1 ? 's' : ''} waiting for you.` : 'All caught up — nothing new right now.'}
+              </p>
+              <button className="acid-btn" style={{ width: '100%' }} onClick={() => setTab('tasks')}>Open my tasks →</button>
+            </>
+          )}
         </div>
       </div>
     </>
