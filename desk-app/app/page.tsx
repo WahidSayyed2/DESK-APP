@@ -784,6 +784,7 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       draggable
       onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
     >
+      <div className="drag-handle" title="Drag to move this card">⠿⠿ drag to move</div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="pill cat-pill">{t.category || 'Tasks'}</span>
         <span className={'pill prio-' + t.priority}>{t.priority}</span>

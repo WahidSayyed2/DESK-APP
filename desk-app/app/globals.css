@@ -142,6 +142,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .reminder-input:focus{outline:none;border-color:var(--violet)}
 .work{cursor:grab}
 .work:active{cursor:grabbing}
+.drag-handle{font-size:9px;color:#9aa2a9;letter-spacing:.06em;text-transform:uppercase;font-weight:800;margin-bottom:8px;cursor:grab;user-select:none}
 .pipeline-col-body{min-height:60px}
 
 .leverage-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px 4px;border-bottom:1px solid var(--line)}
