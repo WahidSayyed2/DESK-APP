@@ -26,6 +26,7 @@ type Task = {
 type TaskUpdate = { id: string; task_id: string; by_role: Role; text: string; created_at: string };
 type Reminder = { id: string; owner_role: Role; text: string; freq: 'day' | 'week' | 'month'; created_at: string };
 type ChatMessage = { id: string; from_role: Role; text: string; created_at: string };
+type Notif = { id: string; recipient_role: Role; text: string; task_id: string | null; seen: boolean; created_at: string };
 type Profile = { id: string; role: Role; name: string };
 
 type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat';
@@ -43,6 +44,7 @@ export default function Home() {
   const [updates, setUpdates] = useState<TaskUpdate[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [notifs, setNotifs] = useState<Notif[]>([]);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [unread, setUnread] = useState(0);
 
@@ -200,12 +202,39 @@ export default function Home() {
       setChat(data as ChatMessage[]);
     }
   }
+  const prevNotifCount = useRef<number | null>(null);
+  async function loadNotifs() {
+    if (!profile) return;
+    const { data } = await supabase.from('notifications').select('*').eq('recipient_role', profile.role).order('created_at', { ascending: false });
+    if (data) {
+      const unseenNow = data.filter((n: any) => !n.seen).length;
+      if (prevNotifCount.current !== null && unseenNow > prevNotifCount.current) {
+        const newest = data.find((n: any) => !n.seen);
+        if (newest) pushNotify('🔔 ' + newest.text, '');
+      }
+      prevNotifCount.current = unseenNow;
+      setNotifs(data as Notif[]);
+    }
+  }
+  async function notifyRole(recipientRole: Role, text: string, taskId: string | null = null) {
+    await supabase.from('notifications').insert({ recipient_role: recipientRole, text, task_id: taskId });
+  }
+  async function markNotifSeen(id: string) {
+    await supabase.from('notifications').update({ seen: true }).eq('id', id);
+    loadNotifs();
+  }
+  async function markAllNotifsSeen() {
+    if (!profile) return;
+    await supabase.from('notifications').update({ seen: true }).eq('recipient_role', profile.role).eq('seen', false);
+    loadNotifs();
+  }
 
   useEffect(() => {
     if (!profile) return;
     loadTasks();
     loadReminders();
     loadChat();
+    loadNotifs();
     const lastRead = Number(localStorage.getItem('desk_notif_read_' + profile.role) || 0);
 
     const channel = supabase
@@ -214,6 +243,7 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_updates' }, () => loadTasks())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => loadChat())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reminders' }, () => loadReminders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => loadNotifs())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -286,9 +316,13 @@ export default function Home() {
         updates={updates}
         reminders={reminders}
         chat={chat}
+        notifs={notifs}
+        markNotifSeen={markNotifSeen}
+        markAllNotifsSeen={markAllNotifsSeen}
+        notifyRole={notifyRole}
         profile={profile}
         toast={toast}
-        reload={{ loadTasks, loadReminders, loadChat }}
+        reload={{ loadTasks, loadReminders, loadChat, loadNotifs }}
         toasts={toasts}
         notifPermission={notifPermission}
         requestNotifPermission={requestNotifPermission}
@@ -361,8 +395,9 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
   const [collapsed, setCollapsed] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
   const navItems =
     role === 'director'
       ? [
@@ -383,6 +418,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
 
   const statusLabel = notifPermission === 'granted' ? 'Notifications on' : notifPermission === 'denied' ? 'Notifications blocked' : 'Notifications off';
   const statusColor = notifPermission === 'granted' ? 'var(--mint)' : notifPermission === 'denied' ? 'var(--rose)' : 'var(--amber)';
+  const unseenNotifs = (notifs || []).filter((n: Notif) => !n.seen);
 
   return (
     <div className={'app-shell' + (collapsed ? ' sidebar-collapsed' : '')}>
@@ -394,6 +430,33 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {collapsed ? '»' : '«'}
           </button>
         </div>
+
+        <div className="bell-wrap">
+          <button className="bell-btn" onClick={() => setBellOpen((b) => !b)} title="Notifications">
+            🔔{!collapsed && <span>Notifications</span>}
+            {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
+          </button>
+          {bellOpen && (
+            <div className="bell-panel">
+              <div className="bell-panel-head">
+                <span>Notifications</span>
+                {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+              </div>
+              <div className="bell-panel-list">
+                {(notifs || []).length ? notifs.map((n: Notif) => (
+                  <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
+                    <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
+                      {n.text}
+                      <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
+                  </div>
+                )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+
         <nav className="nav">
           {navItems.map((item: any) => (
             <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)} title={collapsed ? item.label : undefined}>
@@ -424,8 +487,8 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         <main>
           <section className="section">
             {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} />}
-            {tab === 'newtask' && <NewTask toast={toast} reload={reload} />}
-            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} />}
+            {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
+            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
             {tab === 'ai' && <AIPortal role={role} />}
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
@@ -516,6 +579,12 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
     if (ms < 24 * 60 * 60 * 1000) return Math.round(ms / 3600000) + 'h';
     return Math.round(ms / 86400000) + 'd';
   }
+
+  const nowExecuting = leverage[0] as Task | undefined;
+  const followUpsDueTodayCount = tasks.filter((t: Task) => t.status === 'followup').length;
+  const waitingResponseCount = tasks.filter((t: Task) => t.status === 'update').length;
+  const resultsReadyCount = tasks.filter((t: Task) => t.status === 'closure').length;
+  const progressUpdatesToday = updates.filter((u: TaskUpdate) => new Date(u.created_at).toDateString() === new Date().toDateString()).length;
 
   const attentionCount = overdue + critical + dueToday;
   const movedBeyondCapturePct = total > 0 ? Math.round((tasks.filter((t: Task) => t.status !== 'captured').length / total) * 100) : 0;
@@ -673,6 +742,51 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
         })}
       </div>
 
+      {nowExecuting && (
+        <div className="grid-2" style={{ marginBottom: 20 }}>
+          <div className="glass hero now-executing">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <span className="eyebrow" style={{ color: 'var(--amber)', margin: 0 }}>Now executing · {nowExecuting.priority === 'critical' || nowExecuting.priority === 'high' ? 'P1' : 'P2'}</span>
+              <span style={{ fontSize: 11, color: '#8f9ba7' }}>{nowExecuting.category} · {STAGE_LABELS[nowExecuting.status]}</span>
+            </div>
+            <h3 style={{ fontSize: 26, marginBottom: 10, lineHeight: 1.25 }}>{nowExecuting.title}</h3>
+            <p className="sub" style={{ fontSize: 12.5, marginBottom: 20 }}>{nowExecuting.description || 'No description provided.'}</p>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <button className="acid-btn" onClick={() => goToTasks({ kind: 'single', id: nowExecuting.id })}>Complete next action</button>
+              <button className="soft-btn" onClick={() => setTab('tasks')}>Open full work</button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ flex: 1, height: 8, borderRadius: 20, background: 'rgba(255,255,255,.08)', overflow: 'hidden' }}>
+                <div style={{ width: movedBeyondCapturePct + '%', height: '100%', background: 'linear-gradient(90deg, var(--amber), var(--acid))' }} />
+              </div>
+              <span style={{ fontSize: 22, fontWeight: 900 }}>{movedBeyondCapturePct}%</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div className="glass card-block" style={{ flex: 1 }}>
+              <div style={{ fontSize: 34, fontWeight: 900, marginBottom: 6 }}>{followUpsDueTodayCount}</div>
+              <div className="sub" style={{ fontSize: 12, marginBottom: 14 }}>follow-ups in progress</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
+                <span style={{ color: '#8f9ba7' }}>Overdue dependencies</span><b>{overdue}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
+                <span style={{ color: '#8f9ba7' }}>Waiting response</span><b>{waitingResponseCount}</b>
+              </div>
+            </div>
+            <div className="glass card-block" style={{ flex: 1 }}>
+              <div style={{ fontSize: 34, fontWeight: 900, marginBottom: 6 }}>{resultsReadyCount}</div>
+              <div className="sub" style={{ fontSize: 12, marginBottom: 14 }}>results ready for review</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
+                <span style={{ color: '#8f9ba7' }}>Completed this week</span><b>{completedThisWeek}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
+                <span style={{ color: '#8f9ba7' }}>Progress updates today</span><b>{progressUpdatesToday}</b>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="glass card-block" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ margin: 0 }}>Highest-leverage work now</h3>
@@ -728,7 +842,7 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
 // =========================================================
 // New task capture (voice/text -> task, direct, no AI)
 // =========================================================
-function NewTask({ toast, reload }: any) {
+function NewTask({ toast, reload, notifyRole }: any) {
   const [text, setText] = useState('');
   const [category, setCategory] = useState<Category>('Tasks');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
@@ -770,7 +884,7 @@ function NewTask({ toast, reload }: any) {
     if (listening) { recRef.current.stop(); setListening(false); }
     setBusy(true);
     const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase.from('tasks').insert({
+    const { data: inserted, error } = await supabase.from('tasks').insert({
       title: deriveTitle(text),
       description: text.trim(),
       category,
@@ -778,9 +892,10 @@ function NewTask({ toast, reload }: any) {
       due_date: dueDate || null,
       status: 'captured',
       created_by: userData.user?.id,
-    });
+    }).select().single();
     setBusy(false);
     if (error) { toast('Could not save task: ' + error.message); return; }
+    if (inserted) await notifyRole('ea', `New task: "${inserted.title}"`, inserted.id);
     setText(''); setCategory('Tasks'); setPriority('medium'); setDueDate('');
     toast('Task sent to the EA.');
     reload.loadTasks();
@@ -838,7 +953,8 @@ function NewTask({ toast, reload }: any) {
 // =========================================================
 // Tasks — kanban pipeline (Captured -> Progress -> Follow-up -> Update -> Closure -> Completed)
 // =========================================================
-function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
+function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRole }: any) {
+  const otherRole: Role = role === 'ea' ? 'director' : 'ea';
   async function moveStage(id: string, dir: 1 | -1) {
     const t = tasks.find((x: Task) => x.id === id);
     if (!t) return;
@@ -847,6 +963,7 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
     if (!next) return;
     await supabase.from('tasks').update({ status: next }).eq('id', id);
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Moved to "${STAGE_LABELS[next]}"` });
+    await notifyRole(otherRole, `"${t.title}" moved to ${STAGE_LABELS[next]}`, id);
     reload.loadTasks();
   }
   async function moveToStage(id: string, targetStage: Stage) {
@@ -854,6 +971,7 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
     if (!t || t.status === targetStage) return;
     await supabase.from('tasks').update({ status: targetStage }).eq('id', id);
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: `Moved to "${STAGE_LABELS[targetStage]}"` });
+    await notifyRole(otherRole, `"${t.title}" moved to ${STAGE_LABELS[targetStage]}`, id);
     reload.loadTasks();
   }
   async function postUpdate(id: string, text: string) {
@@ -861,6 +979,7 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus }: any) {
     await supabase.from('task_updates').insert({ task_id: id, by_role: role, text });
     const t = tasks.find((x: Task) => x.id === id);
     if (t && t.status === 'captured') await supabase.from('tasks').update({ status: 'progress' }).eq('id', id);
+    if (t) await notifyRole(otherRole, `Update on "${t.title}": ${text}`, id);
     reload.loadTasks();
     toast('Update posted — Director will see it live.');
   }
