@@ -243,7 +243,21 @@ export default function Home() {
   async function loadAttendance() {
     const { data, error } = await supabase.from('attendance').select('*').order('punch_in', { ascending: false });
     if (error) { console.error('loadAttendance failed:', error.message); return; }
-    if (data) setAttendance(data as AttendanceRow[]);
+    if (data) {
+      setAttendance(data as AttendanceRow[]);
+      // auto-close any session left open from a previous day — a punch-in
+      // should never be punched out on a different calendar day
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const stale = (data as AttendanceRow[]).filter((a) => !a.punch_out && a.punch_in.slice(0, 10) < todayStr);
+      for (const s of stale) {
+        const endOfDay = s.punch_in.slice(0, 10) + 'T23:59:59.000Z';
+        await supabase.from('attendance').update({ punch_out: endOfDay }).eq('id', s.id);
+      }
+      if (stale.length) {
+        const { data: fresh } = await supabase.from('attendance').select('*').order('punch_in', { ascending: false });
+        if (fresh) setAttendance(fresh as AttendanceRow[]);
+      }
+    }
   }
   async function punchIn() {
     if (!profile) return;
@@ -253,6 +267,13 @@ export default function Home() {
     loadAttendance();
   }
   async function punchOut(id: string) {
+    const rec = attendance.find((a) => a.id === id);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (rec && rec.punch_in.slice(0, 10) !== todayStr) {
+      toast("That punch-in was from a previous day and has been auto-closed at midnight. Punch in fresh for today.");
+      loadAttendance();
+      return;
+    }
     const { error } = await supabase.from('attendance').update({ punch_out: new Date().toISOString() }).eq('id', id);
     if (error) { toast('⚠️ Punch out failed: ' + error.message); return; }
     toast('Punched out.');
@@ -554,7 +575,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
             {tab === 'ai' && <AIPortal role={role} />}
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
-            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} />}
+            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
             {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
           </section>
         </main>
@@ -1552,11 +1573,13 @@ function Chat({ role, chat, reload }: any) {
 // =========================================================
 // Attendance — punch in/out, daily log, monthly totals, CSV report
 // =========================================================
-function Attendance({ role, attendance, punchIn, punchOut }: any) {
+function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
   const isEA = role === 'ea';
   const eaRecords = (attendance || []).filter((a: AttendanceRow) => a.role === 'ea');
   const myOpen = eaRecords.find((a: AttendanceRow) => !a.punch_out);
   const now = Date.now();
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [generating, setGenerating] = useState(false);
 
   function fmtHours(ms: number) {
     return Math.max(0, ms / 3600000).toFixed(1) + 'h';
@@ -1567,18 +1590,35 @@ function Attendance({ role, attendance, punchIn, punchOut }: any) {
 
   const byDate: Record<string, AttendanceRow[]> = {};
   eaRecords.forEach((a: AttendanceRow) => {
-    const d = new Date(a.punch_in).toISOString().slice(0, 10);
+    const d = a.punch_in.slice(0, 10);
     (byDate[d] = byDate[d] || []).push(a);
   });
-  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  const allDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
   const todayStr = new Date().toISOString().slice(0, 10);
-  const monthStr = new Date().toISOString().slice(0, 7);
+  const thisMonthStr = new Date().toISOString().slice(0, 7);
   const todayTotal = byDate[todayStr] ? dayTotalMs(byDate[todayStr]) : 0;
-  const monthTotal = dates.filter((d) => d.startsWith(monthStr)).reduce((sum, d) => sum + dayTotalMs(byDate[d]), 0);
+  const thisMonthTotal = allDates.filter((d) => d.startsWith(thisMonthStr)).reduce((sum, d) => sum + dayTotalMs(byDate[d]), 0);
+
+  // ---- calendar month being viewed ----
+  const viewDate = new Date();
+  viewDate.setDate(1);
+  viewDate.setMonth(viewDate.getMonth() + monthOffset);
+  const viewYear = viewDate.getFullYear();
+  const viewMonth = viewDate.getMonth();
+  const monthLabel = viewDate.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const viewMonthStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
+  const monthDatesPresent = allDates.filter((d) => d.startsWith(viewMonthStr));
+  const monthTotalViewed = monthDatesPresent.reduce((sum, d) => sum + dayTotalMs(byDate[d]), 0);
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   function exportCSV() {
     const rows: string[][] = [['Date', 'Punch In', 'Punch Out', 'Hours']];
-    dates.forEach((d) => {
+    allDates.forEach((d) => {
       byDate[d].slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime()).forEach((r) => {
         const ms = (r.punch_out ? new Date(r.punch_out).getTime() : now) - new Date(r.punch_in).getTime();
         rows.push([d, new Date(r.punch_in).toLocaleTimeString(), r.punch_out ? new Date(r.punch_out).toLocaleTimeString() : 'Still in', fmtHours(ms)]);
@@ -1595,6 +1635,97 @@ function Attendance({ role, attendance, punchIn, punchOut }: any) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  async function exportPDF() {
+    setGenerating(true);
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      const doc = new jsPDF() as any;
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // header band
+      doc.setFillColor(13, 24, 38);
+      doc.rect(0, 0, pageWidth, 38, 'F');
+      doc.setFillColor(216, 255, 98);
+      doc.roundedRect(14, 10, 18, 18, 4, 4, 'F');
+      doc.setTextColor(13, 24, 38);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text('D', 20.5, 22);
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.text('THE DESK', 38, 19);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(200, 210, 220);
+      doc.text('Attendance Report', 38, 26);
+
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text(profile?.name || 'Executive Assistant', 14, 50);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(90, 90, 90);
+      doc.text('Executive Assistant', 14, 56);
+      doc.text(monthLabel, pageWidth - 14, 50, { align: 'right' });
+      doc.text('Generated ' + new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }), pageWidth - 14, 56, { align: 'right' });
+
+      // summary boxes
+      const boxY = 64;
+      const boxW = (pageWidth - 28 - 16) / 3;
+      const summary = [
+        { label: 'Days present', value: String(monthDatesPresent.length) },
+        { label: 'Total hours', value: fmtHours(monthTotalViewed) },
+        { label: 'Avg hrs / day', value: monthDatesPresent.length ? (monthTotalViewed / 3600000 / monthDatesPresent.length).toFixed(1) + 'h' : '0.0h' },
+      ];
+      summary.forEach((s, i) => {
+        const x = 14 + i * (boxW + 8);
+        doc.setFillColor(244, 241, 235);
+        doc.roundedRect(x, boxY, boxW, 24, 3, 3, 'F');
+        doc.setTextColor(20, 20, 20);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(15);
+        doc.text(s.value, x + boxW / 2, boxY + 12, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(s.label, x + boxW / 2, boxY + 19, { align: 'center' });
+      });
+
+      const rows = monthDatesPresent
+        .slice()
+        .sort((a, b) => a.localeCompare(b))
+        .map((d) => {
+          const records = byDate[d].slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
+          const first = records[0];
+          const last = records[records.length - 1];
+          return [
+            new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
+            new Date(first.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Still in',
+            fmtHours(dayTotalMs(records)),
+          ];
+        });
+
+      doc.autoTable({
+        startY: boxY + 32,
+        head: [['Date', 'Punch In', 'Punch Out', 'Hours']],
+        body: rows,
+        theme: 'plain',
+        headStyles: { fillColor: [13, 24, 38], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: [40, 40, 40] },
+        alternateRowStyles: { fillColor: [248, 247, 244] },
+        styles: { cellPadding: 5 },
+      });
+
+      doc.save(`attendance-${profile?.name || 'ea'}-${monthLabel.replace(' ', '-')}.pdf`);
+    } catch (e) {
+      alert('Could not generate PDF: ' + (e as Error).message);
+    }
+    setGenerating(false);
   }
 
   return (
@@ -1619,28 +1750,61 @@ function Attendance({ role, attendance, punchIn, punchOut }: any) {
 
       <div className="kpi-strip">
         <div className="kpi"><small>Today</small><strong>{fmtHours(todayTotal)}</strong><span>worked so far</span></div>
-        <div className="kpi"><small>This month</small><strong>{fmtHours(monthTotal)}</strong><span>total hours</span></div>
+        <div className="kpi"><small>This month</small><strong>{fmtHours(thisMonthTotal)}</strong><span>total hours</span></div>
       </div>
 
-      <div className="glass card-block">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>Daily log</h3>
-          <button className="soft-btn" onClick={exportCSV}>⬇ Download report</button>
+      <div className="glass card-block" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="tiny-btn" onClick={() => setMonthOffset((m) => m - 1)}>←</button>
+            <h3 style={{ margin: 0, minWidth: 150, textAlign: 'center' }}>{monthLabel}</h3>
+            <button className="tiny-btn" onClick={() => setMonthOffset((m) => m + 1)} disabled={monthOffset >= 0}>→</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="soft-btn" onClick={exportCSV}>⬇ CSV</button>
+            <button className="soft-btn" onClick={exportPDF} disabled={generating}>{generating ? 'Generating…' : '⬇ PDF report'}</button>
+          </div>
         </div>
-        {dates.length ? dates.map((d) => {
-          const records = byDate[d].slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
-          const first = records[0];
-          const last = records[records.length - 1];
-          return (
-            <div key={d} className="leverage-row">
-              <div>
-                <div className="leverage-title">{new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                <div className="leverage-sub">In {new Date(first.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Out {last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Still in'}</div>
+
+        <div className="cal-grid cal-dow">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="cal-dow-label">{d}</div>)}
+        </div>
+        <div className="cal-grid">
+          {cells.map((day, i) => {
+            if (day === null) return <div key={'e' + i} className="cal-cell empty-cell" />;
+            const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const records = byDate[dateStr];
+            const isPast = dateStr < todayStr;
+            const isToday = dateStr === todayStr;
+            const present = !!records;
+            const absent = !present && (isPast || isToday);
+            let inTime = '', outTime = '';
+            if (records) {
+              const sorted = records.slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
+              inTime = new Date(sorted[0].punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const last = sorted[sorted.length - 1];
+              outTime = last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In progress';
+            }
+            return (
+              <div key={dateStr} className={'cal-cell' + (present ? ' present' : '') + (absent ? ' absent' : '') + (isToday ? ' today' : '')}>
+                <div className="cal-daynum">{day}</div>
+                {present && (
+                  <div className="cal-times">
+                    <div>{inTime}</div>
+                    <div style={{ opacity: .7 }}>{outTime}</div>
+                  </div>
+                )}
+                {absent && <div className="cal-absent-label">Absent</div>}
               </div>
-              <b style={{ flexShrink: 0 }}>{fmtHours(dayTotalMs(records))}</b>
-            </div>
-          );
-        }) : <div className="empty">No attendance recorded yet.</div>}
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 10.5, color: '#8f9ba7' }}>
+          <span><span className="cal-legend-dot present" /> Present</span>
+          <span><span className="cal-legend-dot absent" /> Absent</span>
+          <span><span className="cal-legend-dot today" /> Today</span>
+        </div>
       </div>
     </>
   );
