@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 
 type Role = 'director' | 'ea';
@@ -654,31 +655,36 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         {toasts.map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>
     </div>
-    <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
-      🔔
-      {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
-    </button>
-    {bellOpen && (
-      <div className="bell-panel bell-panel-fixed">
-        <div className="bell-panel-head">
-          <span>Notifications</span>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
-            <button className="bell-dismiss" onClick={() => setBellOpen(false)} title="Close" style={{ fontSize: 15 }}>✕</button>
-          </div>
-        </div>
-        <div className="bell-panel-list">
-          {(notifs || []).length ? notifs.map((n: Notif) => (
-            <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
-              <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
-                {n.text}
-                <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+    {typeof document !== 'undefined' && createPortal(
+      <>
+        <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
+          🔔
+          {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
+        </button>
+        {bellOpen && (
+          <div className="bell-panel bell-panel-fixed">
+            <div className="bell-panel-head">
+              <span>Notifications</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+                <button className="bell-dismiss" onClick={() => setBellOpen(false)} title="Close" style={{ fontSize: 15 }}>✕</button>
               </div>
-              {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
             </div>
-          )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
-        </div>
-      </div>
+            <div className="bell-panel-list">
+              {(notifs || []).length ? notifs.map((n: Notif) => (
+                <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
+                  <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
+                    {n.text}
+                    <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                  {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
+                </div>
+              )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
+            </div>
+          </div>
+        )}
+      </>,
+      document.body
     )}
     </>
   );
@@ -1905,44 +1911,46 @@ function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
           </div>
         </div>
 
-        <div className="cal-grid cal-dow">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="cal-dow-label">{d}</div>)}
-        </div>
-        <div className="cal-grid">
-          {cells.map((day, i) => {
-            if (day === null) return <div key={'e' + i} className="cal-cell empty-cell" />;
-            const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const records = byDate[dateStr];
-            const isPast = dateStr < todayStr;
-            const isToday = dateStr === todayStr;
-            const present = !!records;
-            const absent = !present && (isPast || isToday);
-            let inTime = '', outTime = '';
-            if (records) {
-              const sorted = records.slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
-              inTime = new Date(sorted[0].punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              const last = sorted[sorted.length - 1];
-              outTime = last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In progress';
-            }
-            return (
-              <div key={dateStr} className={'cal-cell' + (present ? ' present' : '') + (absent ? ' absent' : '') + (isToday ? ' today' : '')}>
-                <div className="cal-daynum">{day}</div>
-                {present && (
-                  <div className="cal-times">
-                    <div>{inTime}</div>
-                    <div style={{ opacity: .7 }}>{outTime}</div>
-                  </div>
-                )}
-                {absent && <div className="cal-absent-label">Absent</div>}
-              </div>
-            );
-          })}
-        </div>
+        <div className="cal-wrap">
+          <div className="cal-grid cal-dow">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="cal-dow-label">{d}</div>)}
+          </div>
+          <div className="cal-grid">
+            {cells.map((day, i) => {
+              if (day === null) return <div key={'e' + i} className="cal-cell empty-cell" />;
+              const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const records = byDate[dateStr];
+              const isPast = dateStr < todayStr;
+              const isToday = dateStr === todayStr;
+              const present = !!records;
+              const absent = !present && (isPast || isToday);
+              let inTime = '', outTime = '';
+              if (records) {
+                const sorted = records.slice().sort((a, b) => new Date(a.punch_in).getTime() - new Date(b.punch_in).getTime());
+                inTime = new Date(sorted[0].punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const last = sorted[sorted.length - 1];
+                outTime = last.punch_out ? new Date(last.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In progress';
+              }
+              return (
+                <div key={dateStr} className={'cal-cell' + (present ? ' present' : '') + (absent ? ' absent' : '') + (isToday ? ' today' : '')}>
+                  <div className="cal-daynum">{day}</div>
+                  {present && (
+                    <div className="cal-times">
+                      <div>{inTime}</div>
+                      <div style={{ opacity: .7 }}>{outTime}</div>
+                    </div>
+                  )}
+                  {absent && <div className="cal-absent-label">Absent</div>}
+                </div>
+              );
+            })}
+          </div>
 
-        <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 10.5, color: '#8f9ba7' }}>
-          <span><span className="cal-legend-dot present" /> Present</span>
-          <span><span className="cal-legend-dot absent" /> Absent</span>
-          <span><span className="cal-legend-dot today" /> Today</span>
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 10.5, color: '#8f9ba7', justifyContent: 'center' }}>
+            <span><span className="cal-legend-dot present" /> Present</span>
+            <span><span className="cal-legend-dot absent" /> Absent</span>
+            <span><span className="cal-legend-dot today" /> Today</span>
+          </div>
         </div>
       </div>
     </>

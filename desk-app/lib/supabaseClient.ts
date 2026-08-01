@@ -10,7 +10,7 @@ if (typeof window !== 'undefined' && (!process.env.NEXT_PUBLIC_SUPABASE_URL || !
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: true,
+    persistSession: false,
     autoRefreshToken: true,
   },
 });
