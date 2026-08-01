@@ -29,9 +29,11 @@ type ChatMessage = { id: string; from_role: Role; text: string; created_at: stri
 type Notif = { id: string; recipient_role: Role; text: string; task_id: string | null; seen: boolean; created_at: string };
 type Profile = { id: string; role: Role; name: string };
 
-type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat' | 'attendance' | 'wishlist';
+type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat' | 'attendance' | 'wishlist' | 'expense';
 type AttendanceRow = { id: string; role: Role; punch_in: string; punch_out: string | null; created_at: string };
 type WishlistItem = { id: string; text: string; added_by: Role; done: boolean; created_at: string };
+type Expense = { id: string; uploaded_by: Role; description: string | null; amount: number; receipt_url: string | null; receipt_name: string | null; expense_date: string; created_at: string };
+type CostComparison = { id: string; item_name: string; quantity: number; existing_vendor: string | null; existing_rate: number; new_vendor: string | null; new_rate: number; created_by: Role; created_at: string };
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,8 @@ export default function Home() {
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [costComparisons, setCostComparisons] = useState<CostComparison[]>([]);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [unread, setUnread] = useState(0);
 
@@ -300,6 +304,40 @@ export default function Home() {
     loadWishlist();
   }
 
+  async function loadExpenses() {
+    const { data, error } = await supabase.from('expenses').select('*').order('expense_date', { ascending: false });
+    if (error) { console.error('loadExpenses failed:', error.message); return; }
+    if (data) setExpenses(data as Expense[]);
+  }
+  async function addExpense(payload: { description: string; amount: number; expense_date: string; receipt_url: string | null; receipt_name: string | null }) {
+    if (!profile) return;
+    const { error } = await supabase.from('expenses').insert({ ...payload, uploaded_by: profile.role });
+    if (error) { toast('⚠️ Could not save expense: ' + error.message); return; }
+    toast('Expense logged.');
+    loadExpenses();
+  }
+  async function deleteExpense(id: string) {
+    await supabase.from('expenses').delete().eq('id', id);
+    loadExpenses();
+  }
+
+  async function loadCostComparisons() {
+    const { data, error } = await supabase.from('cost_comparisons').select('*').order('created_at', { ascending: false });
+    if (error) { console.error('loadCostComparisons failed:', error.message); return; }
+    if (data) setCostComparisons(data as CostComparison[]);
+  }
+  async function addCostComparison(payload: { item_name: string; quantity: number; existing_vendor: string; existing_rate: number; new_vendor: string; new_rate: number }) {
+    if (!profile) return;
+    const { error } = await supabase.from('cost_comparisons').insert({ ...payload, created_by: profile.role });
+    if (error) { toast('⚠️ Could not save comparison: ' + error.message); return; }
+    toast('Cost comparison saved.');
+    loadCostComparisons();
+  }
+  async function deleteCostComparison(id: string) {
+    await supabase.from('cost_comparisons').delete().eq('id', id);
+    loadCostComparisons();
+  }
+
   useEffect(() => {
     if (!profile) return;
     loadTasks();
@@ -308,6 +346,8 @@ export default function Home() {
     loadNotifs();
     loadAttendance();
     loadWishlist();
+    loadExpenses();
+    loadCostComparisons();
     const lastRead = Number(localStorage.getItem('desk_notif_read_' + profile.role) || 0);
 
     const channel = supabase
@@ -319,6 +359,8 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => loadNotifs())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => loadAttendance())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wishlist_items' }, () => loadWishlist())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => loadExpenses())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cost_comparisons' }, () => loadCostComparisons())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -402,6 +444,12 @@ export default function Home() {
         addWishlistItem={addWishlistItem}
         toggleWishlistItem={toggleWishlistItem}
         deleteWishlistItem={deleteWishlistItem}
+        expenses={expenses}
+        addExpense={addExpense}
+        deleteExpense={deleteExpense}
+        costComparisons={costComparisons}
+        addCostComparison={addCostComparison}
+        deleteCostComparison={deleteCostComparison}
         profile={profile}
         toast={toast}
         reload={{ loadTasks, loadReminders, loadChat, loadNotifs }}
@@ -477,7 +525,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costComparisons, addCostComparison, deleteCostComparison, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const navItems =
@@ -488,6 +536,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'tasks', label: 'All Tasks', ic: '☰' },
           { id: 'reminders', label: 'Reminders', ic: '◷' },
           { id: 'attendance', label: 'Attendance', ic: '🕐' },
+          { id: 'expense', label: 'Expense', ic: '₹' },
           { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
@@ -497,6 +546,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'tasks', label: 'My Tasks', ic: '☰', badge: true },
           { id: 'reminders', label: 'Reminders', ic: '◷' },
           { id: 'attendance', label: 'Attendance', ic: '🕐' },
+          { id: 'expense', label: 'Expense', ic: '₹' },
           { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
@@ -569,7 +619,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         )}
         <main>
           <section className="section">
-            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} />}
+            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costComparisons={costComparisons} />}
             {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
             {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
@@ -577,6 +627,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
             {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
             {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
+            {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} costComparisons={costComparisons} addCostComparison={addCostComparison} deleteCostComparison={deleteCostComparison} toast={toast} />}
           </section>
         </main>
       </div>
@@ -615,7 +666,7 @@ function Ring({ value, total, color, label, sub, onClick }: any) {
 // =========================================================
 // Dashboard — shared landing page for both Director and EA
 // =========================================================
-function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
+function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, costComparisons }: any) {
   const total = tasks.length;
   const done = tasks.filter((t: Task) => t.status === 'completed').length;
   const progress = tasks.filter((t: Task) => !['captured', 'completed'].includes(t.status)).length;
@@ -814,18 +865,52 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread }: any) {
             'Cost Improvement': { icon: '↓', accent: '#ffbd64' },
           };
           const m = meta[c] || meta.Tasks;
+          const savedHere = c === 'Cost Improvement'
+            ? (costComparisons || []).reduce((sum: number, cc: CostComparison) => sum + (cc.existing_rate - cc.new_rate) * cc.quantity, 0)
+            : null;
           return (
-            <button key={c} className="category-card" style={{ borderTop: `4px solid ${m.accent}` }} onClick={() => goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
+            <button key={c} className="category-card" style={{ borderTop: `4px solid ${m.accent}` }} onClick={() => c === 'Cost Improvement' ? setTab('expense') : goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
               <div className="cc-top">
                 <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
                 <span className="cc-icon" style={{ background: m.accent + '22', color: m.accent }}>{m.icon}</span>
               </div>
               <span className="cc-name">{c}</span>
-              <span className="cc-count">{count} open</span>
+              <span className="cc-count">
+                {count} open{savedHere !== null ? ` · ₹${savedHere.toLocaleString('en-IN', { maximumFractionDigits: 0 })} saved` : ''}
+              </span>
             </button>
           );
         })}
       </div>
+
+      {(expenses !== undefined) && (
+        <div className="grid-2" style={{ marginBottom: 20 }}>
+          <div className="glass card-block">
+            <span className="pill" style={{ color: '#ffbd64', borderColor: 'rgba(255,189,100,.3)', marginBottom: 14 }}>
+              <i className="dot" style={{ background: '#ffbd64', boxShadow: 'none' }} /> Expenses this month
+            </span>
+            <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 4 }}>
+              ₹{(expenses || []).filter((e: Expense) => e.expense_date.startsWith(new Date().toISOString().slice(0, 7))).reduce((s: number, e: Expense) => s + Number(e.amount), 0).toLocaleString('en-IN')}
+            </div>
+            <p className="sub" style={{ fontSize: 12 }}>
+              {(expenses || []).filter((e: Expense) => e.expense_date.startsWith(new Date().toISOString().slice(0, 7))).length} invoices uploaded
+              {' · '}<span onClick={() => setTab('expense')} style={{ cursor: 'pointer', color: 'var(--acid)' }}>View all →</span>
+            </p>
+          </div>
+          <div className="glass card-block">
+            <span className="pill" style={{ color: 'var(--mint)', borderColor: 'rgba(101,237,189,.3)', marginBottom: 14 }}>
+              <i className="dot" style={{ background: 'var(--mint)', boxShadow: 'none' }} /> Cost savings identified
+            </span>
+            <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 4 }}>
+              ₹{(costComparisons || []).reduce((s: number, c: CostComparison) => s + (c.existing_rate - c.new_rate) * c.quantity, 0).toLocaleString('en-IN')}
+            </div>
+            <p className="sub" style={{ fontSize: 12 }}>
+              {(costComparisons || []).length} vendor comparison{(costComparisons || []).length !== 1 ? 's' : ''} logged
+              {' · '}<span onClick={() => setTab('expense')} style={{ cursor: 'pointer', color: 'var(--acid)' }}>Review →</span>
+            </p>
+          </div>
+        </div>
+      )}
 
       {nowExecuting && (
         <div className="grid-2" style={{ marginBottom: 20 }}>
@@ -1856,6 +1941,295 @@ function Wishlist({ role, wishlist, addWishlistItem, toggleWishlistItem, deleteW
             ))}
           </>
         )}
+      </div>
+    </>
+  );
+}
+
+// =========================================================
+// Expense — invoice/bill uploads + vendor cost comparison
+// =========================================================
+function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costComparisons, addCostComparison, deleteCostComparison, toast }: any) {
+  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState('');
+  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [uploading, setUploading] = useState(false);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [receiptName, setReceiptName] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [filter, setFilter] = useState<'day' | 'week' | 'month' | 'all'>('month');
+  const [generating, setGenerating] = useState(false);
+
+  const [itemName, setItemName] = useState('');
+  const [qty, setQty] = useState('1');
+  const [existingVendor, setExistingVendor] = useState('');
+  const [existingRate, setExistingRate] = useState('');
+  const [newVendor, setNewVendor] = useState('');
+  const [newRate, setNewRate] = useState('');
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const path = `receipts/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+    const { error: upErr } = await supabase.storage.from('attachments').upload(path, file);
+    if (upErr) { setUploading(false); toast('⚠️ Upload failed: ' + upErr.message); return; }
+    const { data: pub } = supabase.storage.from('attachments').getPublicUrl(path);
+    setReceiptUrl(pub.publicUrl);
+    setReceiptName(file.name);
+    setUploading(false);
+  }
+
+  function submitExpense() {
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { toast('Enter a valid amount.'); return; }
+    addExpense({ description: desc.trim(), amount: amt, expense_date: expenseDate, receipt_url: receiptUrl, receipt_name: receiptName });
+    setDesc(''); setAmount(''); setReceiptUrl(null); setReceiptName(null);
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function submitComparison() {
+    const q = parseFloat(qty) || 1;
+    const er = parseFloat(existingRate);
+    const nr = parseFloat(newRate);
+    if (!itemName.trim() || !er || !nr) { toast('Fill in item name and both rates.'); return; }
+    addCostComparison({ item_name: itemName.trim(), quantity: q, existing_vendor: existingVendor.trim(), existing_rate: er, new_vendor: newVendor.trim(), new_rate: nr });
+    setItemName(''); setQty('1'); setExistingVendor(''); setExistingRate(''); setNewVendor(''); setNewRate('');
+  }
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+  const monthStr = now.toISOString().slice(0, 7);
+
+  const filtered = (expenses || []).filter((e: Expense) => {
+    if (filter === 'day') return e.expense_date === todayStr;
+    if (filter === 'week') return e.expense_date >= weekAgo;
+    if (filter === 'month') return e.expense_date.startsWith(monthStr);
+    return true;
+  });
+  const filteredTotal = filtered.reduce((sum: number, e: Expense) => sum + Number(e.amount), 0);
+
+  function isImage(name?: string | null) {
+    return !!name && /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
+  }
+  function fmtMoney(n: number) {
+    return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+
+  async function exportExpensePDF() {
+    setGenerating(true);
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      const doc = new jsPDF() as any;
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      doc.setFillColor(13, 24, 38);
+      doc.rect(0, 0, pageWidth, 38, 'F');
+      doc.setFillColor(216, 255, 98);
+      doc.roundedRect(14, 10, 18, 18, 4, 4, 'F');
+      doc.setTextColor(13, 24, 38);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text('D', 20.5, 22);
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.text('THE DESK', 38, 19);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(200, 210, 220);
+      doc.text('Expense Report', 38, 26);
+
+      const filterLabel = { day: 'Today', week: 'Last 7 days', month: 'This month', all: 'All time' }[filter];
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(90, 90, 90);
+      doc.text('Period: ' + filterLabel, 14, 50);
+      doc.text('Generated ' + new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }), pageWidth - 14, 50, { align: 'right' });
+
+      const boxY = 58;
+      const boxW = (pageWidth - 28 - 16) / 3;
+      const summary = [
+        { label: 'Total invoices', value: String(filtered.length) },
+        { label: 'Total amount', value: fmtMoney(filteredTotal) },
+        { label: 'Avg per invoice', value: filtered.length ? fmtMoney(filteredTotal / filtered.length) : '₹0' },
+      ];
+      summary.forEach((s: any, i: number) => {
+        const x = 14 + i * (boxW + 8);
+        doc.setFillColor(244, 241, 235);
+        doc.roundedRect(x, boxY, boxW, 24, 3, 3, 'F');
+        doc.setTextColor(20, 20, 20);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text(s.value, x + boxW / 2, boxY + 12, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(s.label, x + boxW / 2, boxY + 19, { align: 'center' });
+      });
+
+      const rows = filtered
+        .slice()
+        .sort((a: Expense, b: Expense) => a.expense_date.localeCompare(b.expense_date))
+        .map((e: Expense) => [
+          new Date(e.expense_date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+          e.description || '—',
+          e.uploaded_by === 'ea' ? 'EA' : 'Director',
+          fmtMoney(Number(e.amount)),
+        ]);
+
+      doc.autoTable({
+        startY: boxY + 32,
+        head: [['Date', 'Description', 'Uploaded by', 'Amount']],
+        body: rows,
+        theme: 'plain',
+        headStyles: { fillColor: [13, 24, 38], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: [40, 40, 40] },
+        alternateRowStyles: { fillColor: [248, 247, 244] },
+        styles: { cellPadding: 5 },
+      });
+
+      doc.save(`expenses-${filterLabel.replace(/\s/g, '-')}-${todayStr}.pdf`);
+    } catch (e) {
+      alert('Could not generate PDF: ' + (e as Error).message);
+    }
+    setGenerating(false);
+  }
+
+  const totalSaved = (costComparisons || []).reduce((sum: number, c: CostComparison) => sum + (c.existing_rate - c.new_rate) * c.quantity, 0);
+
+  return (
+    <>
+      <div className="eyebrow">Finance</div>
+      <h2>Expense &amp; cost improvement.</h2>
+      <p className="sub">Every invoice, and every rupee saved by comparing vendors — both visible to the Director in real time.</p>
+
+      {/* ---------- Log expense ---------- */}
+      <div className="glass hero" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 14 }}>Log an expense</h3>
+        <div className="form-grid" style={{ marginBottom: 12 }}>
+          <div className="full">
+            <label className="field-label">Description</label>
+            <input className="input" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. Courier charges, office supplies..." />
+          </div>
+          <div>
+            <label className="field-label">Amount (₹)</label>
+            <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+          </div>
+          <div>
+            <label className="field-label">Date</label>
+            <input className="input" type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="soft-btn" onClick={() => fileRef.current?.click()} disabled={uploading}>
+            {uploading ? 'Uploading…' : receiptUrl ? '✓ Receipt attached' : '📎 Attach invoice/bill'}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFile} />
+          <button className="acid-btn" style={{ marginLeft: 'auto' }} onClick={submitExpense}>Save expense →</button>
+        </div>
+      </div>
+
+      <div className="glass card-block" style={{ marginBottom: 30 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <h3 style={{ margin: 0 }}>Expense log</h3>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['day', 'week', 'month', 'all'] as const).map((f) => (
+              <button key={f} className={filter === f ? 'acid-btn' : 'soft-btn'} style={{ padding: '7px 13px', fontSize: 11 }} onClick={() => setFilter(f)}>
+                {{ day: 'Daily', week: 'Weekly', month: 'Monthly', all: 'All' }[f]}
+              </button>
+            ))}
+            <button className="soft-btn" onClick={exportExpensePDF} disabled={generating}>{generating ? 'Generating…' : '⬇ PDF'}</button>
+          </div>
+        </div>
+        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 4 }}>{fmtMoney(filteredTotal)}</div>
+        <div className="sub" style={{ fontSize: 12, marginBottom: 18 }}>{filtered.length} invoice{filtered.length !== 1 ? 's' : ''} in this period</div>
+
+        {filtered.length ? filtered.map((e: Expense) => (
+          <div key={e.id} className="leverage-row">
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              {e.receipt_url && isImage(e.receipt_name) && (
+                <a href={e.receipt_url} target="_blank" rel="noreferrer"><img src={e.receipt_url} alt="" style={{ width: 42, height: 42, borderRadius: 8, objectFit: 'cover' }} /></a>
+              )}
+              <div>
+                <div className="leverage-title">{e.description || 'Expense'}</div>
+                <div className="leverage-sub">
+                  {new Date(e.expense_date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} · {e.uploaded_by === 'ea' ? 'EA' : 'Director'}
+                  {e.receipt_url && !isImage(e.receipt_name) && <> · <a href={e.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--acid)' }}>📎 receipt</a></>}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+              <b>{fmtMoney(Number(e.amount))}</b>
+              <button className="tiny-btn" onClick={() => deleteExpense(e.id)}>✕</button>
+            </div>
+          </div>
+        )) : <div className="empty">No expenses in this period.</div>}
+      </div>
+
+      {/* ---------- Cost comparison / vendor savings ---------- */}
+      <div className="glass hero" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 14 }}>Compare vendor pricing</h3>
+        <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Log the existing vendor's rate against a cheaper alternative — savings are calculated automatically.</p>
+        <div className="form-grid" style={{ marginBottom: 12 }}>
+          <div className="full">
+            <label className="field-label">Item / service</label>
+            <input className="input" value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. A4 paper (500-sheet ream)" />
+          </div>
+          <div>
+            <label className="field-label">Quantity</label>
+            <input className="input" type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="1" />
+          </div>
+          <div></div>
+          <div>
+            <label className="field-label">Existing vendor</label>
+            <input className="input" value={existingVendor} onChange={(e) => setExistingVendor(e.target.value)} placeholder="Vendor name" />
+          </div>
+          <div>
+            <label className="field-label">Existing rate (₹ / unit)</label>
+            <input className="input" type="number" value={existingRate} onChange={(e) => setExistingRate(e.target.value)} placeholder="0.00" />
+          </div>
+          <div>
+            <label className="field-label">New vendor</label>
+            <input className="input" value={newVendor} onChange={(e) => setNewVendor(e.target.value)} placeholder="Vendor name" />
+          </div>
+          <div>
+            <label className="field-label">New rate (₹ / unit)</label>
+            <input className="input" type="number" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="0.00" />
+          </div>
+        </div>
+        {existingRate && newRate && (
+          <div className="sub" style={{ fontSize: 12.5, marginBottom: 14 }}>
+            Saves <b style={{ color: 'var(--mint)' }}>{fmtMoney((parseFloat(existingRate) - parseFloat(newRate)) * (parseFloat(qty) || 1))}</b> on this comparison
+          </div>
+        )}
+        <button className="acid-btn" onClick={submitComparison}>Save comparison →</button>
+      </div>
+
+      <div className="glass card-block">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Savings identified</h3>
+          <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--mint)' }}>{fmtMoney(totalSaved)}</span>
+        </div>
+        {(costComparisons || []).length ? costComparisons.map((c: CostComparison) => {
+          const saved = (c.existing_rate - c.new_rate) * c.quantity;
+          return (
+            <div key={c.id} className="leverage-row">
+              <div>
+                <div className="leverage-title">{c.item_name} <span style={{ color: '#8f9ba7', fontWeight: 400 }}>× {c.quantity}</span></div>
+                <div className="leverage-sub">
+                  {c.existing_vendor || 'Existing'} @ ₹{c.existing_rate} → {c.new_vendor || 'New vendor'} @ ₹{c.new_rate}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                <b style={{ color: saved >= 0 ? 'var(--mint)' : 'var(--rose)' }}>{saved >= 0 ? '+' : ''}{fmtMoney(saved)}</b>
+                <button className="tiny-btn" onClick={() => deleteCostComparison(c.id)}>✕</button>
+              </div>
+            </div>
+          );
+        }) : <div className="empty">No comparisons logged yet.</div>}
       </div>
     </>
   );
