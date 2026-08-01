@@ -729,7 +729,7 @@ function Ring({ value, total, color, label, sub, onClick }: any) {
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
           style={{ transition: 'stroke-dashoffset .6s ease' }}
         />
-        <text x="50%" y="50%" textAnchor="middle" dy="0.35em" fontSize="26" fontWeight="800" fill="#fff">{value}</text>
+        <text x="50%" y="50%" textAnchor="middle" dy="0.35em" fontSize="26" fontWeight="800" fill="var(--text-main)">{value}</text>
       </svg>
       <div className="ring-label">{label}</div>
       {sub && <div className="ring-sub">{sub}</div>}
@@ -883,7 +883,7 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
           <p className="sub" style={{ fontSize: 11.5, marginBottom: 16 }}>This week vs last week — is work speeding up or slowing down.</p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 18 }}>
             <div style={{ fontSize: 32, fontWeight: 900 }}>{completedThisWeek}</div>
-            <div style={{ fontSize: 12, color: '#8f9ba7' }}>completed this week</div>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>completed this week</div>
             <span
               className="pill"
               style={{
@@ -895,16 +895,16 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
               {weekDelta > 0 ? `▲ +${weekDelta} vs last week` : weekDelta < 0 ? `▼ ${weekDelta} vs last week` : '— same as last week'}
             </span>
           </div>
-          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 800, color: '#73818d', marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 800, color: 'var(--text-faint)', marginBottom: 10 }}>
             Average time per stage
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {STAGES.filter((s) => s !== 'completed').map((s) => {
               const d = stageDurations[s];
               return (
-                <div key={s} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#dce4ea' }}>
+                <div key={s} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-mid)' }}>
                   <span>{STAGE_LABELS[s]}</span>
-                  <span style={{ color: '#8f9ba7', fontFamily: 'ui-monospace, monospace' }}>{d.count ? fmtDuration(d.total / d.count) + ' avg' : '—'}</span>
+                  <span style={{ color: 'var(--text-faint)', fontFamily: 'ui-monospace, monospace' }}>{d.count ? fmtDuration(d.total / d.count) + ' avg' : '—'}</span>
                 </div>
               );
             })}
@@ -999,7 +999,7 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
           <div className="glass hero now-executing">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <span className="eyebrow" style={{ color: 'var(--amber)', margin: 0 }}>Now executing · {nowExecuting.priority === 'critical' || nowExecuting.priority === 'high' ? 'P1' : 'P2'}</span>
-              <span style={{ fontSize: 11, color: '#8f9ba7' }}>{nowExecuting.category} · {STAGE_LABELS[nowExecuting.status]}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{nowExecuting.category} · {STAGE_LABELS[nowExecuting.status]}</span>
             </div>
             <h3 style={{ fontSize: 26, marginBottom: 10, lineHeight: 1.25 }}>{nowExecuting.title}</h3>
             <p className="sub" style={{ fontSize: 12.5, marginBottom: 20 }}>{nowExecuting.description || 'No description provided.'}</p>
@@ -1019,20 +1019,20 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
               <div style={{ fontSize: 34, fontWeight: 900, marginBottom: 6 }}>{followUpsDueTodayCount}</div>
               <div className="sub" style={{ fontSize: 12, marginBottom: 14 }}>follow-ups in progress</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
-                <span style={{ color: '#8f9ba7' }}>Overdue dependencies</span><b>{overdue}</b>
+                <span style={{ color: 'var(--text-faint)' }}>Overdue dependencies</span><b>{overdue}</b>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
-                <span style={{ color: '#8f9ba7' }}>Waiting response</span><b>{waitingResponseCount}</b>
+                <span style={{ color: 'var(--text-faint)' }}>Waiting response</span><b>{waitingResponseCount}</b>
               </div>
             </div>
             <div className="glass card-block" style={{ flex: 1 }}>
               <div style={{ fontSize: 34, fontWeight: 900, marginBottom: 6 }}>{resultsReadyCount}</div>
               <div className="sub" style={{ fontSize: 12, marginBottom: 14 }}>results ready for review</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
-                <span style={{ color: '#8f9ba7' }}>Completed this week</span><b>{completedThisWeek}</b>
+                <span style={{ color: 'var(--text-faint)' }}>Completed this week</span><b>{completedThisWeek}</b>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
-                <span style={{ color: '#8f9ba7' }}>Progress updates today</span><b>{progressUpdatesToday}</b>
+                <span style={{ color: 'var(--text-faint)' }}>Progress updates today</span><b>{progressUpdatesToday}</b>
               </div>
             </div>
           </div>
@@ -1164,7 +1164,7 @@ function NewTask({ toast, reload, notifyRole }: any) {
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Prep the board deck by Friday, high priority, and confirm the venue for the offsite..." />
           <button className="acid-btn" disabled={busy} onClick={createTask}>{busy ? 'Sending…' : 'Create task →'}</button>
         </div>
-        {listening && <div style={{ fontSize: 11, color: '#8f9ba7', marginTop: 10 }}>Listening…</div>}
+        {listening && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>Listening…</div>}
 
         <div style={{ marginTop: 18 }}>
           <label className="field-label">Category</label>
@@ -1421,9 +1421,9 @@ function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder }: {
         {tUpdates.length ? tUpdates.map((u: TaskUpdate) => (
           <div className="upd-line" key={u.id} style={{ marginBottom: 8 }}>
             <b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text}
-            <span style={{ color: '#9aa2a9' }}> · {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+            <span style={{ color: 'var(--text-faint)' }}> · {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
           </div>
-        )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No activity yet.</div>}
+        )) : <div className="upd-line" style={{ color: 'var(--text-faint)' }}>No activity yet.</div>}
         <div className="upd-form" style={{ marginTop: 12 }}>
           <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Post an update..." onKeyDown={(e) => { if (e.key === 'Enter') { postUpdate(t.id, val); setVal(''); } }} />
           <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { postUpdate(t.id, val); setVal(''); }}>Post</button>
@@ -1503,8 +1503,8 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
       {showUpdates && (
         <div className="w-updates" onMouseDown={(e) => e.stopPropagation()}>
           {updates.length ? updates.map((u: TaskUpdate) => (
-            <div className="upd-line" key={u.id}><b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text} <span style={{ color: '#9aa2a9' }}>· {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
-          )) : <div className="upd-line" style={{ color: '#9aa2a9' }}>No updates yet.</div>}
+            <div className="upd-line" key={u.id}><b>{u.by_role === 'ea' ? 'EA' : 'Director'}:</b> {u.text} <span style={{ color: 'var(--text-faint)' }}>· {new Date(u.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
+          )) : <div className="upd-line" style={{ color: 'var(--text-faint)' }}>No updates yet.</div>}
           <div className="upd-form">
             <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Post an update..." onKeyDown={(e) => { if (e.key === 'Enter') { postUpdate(t.id, val); setVal(''); } }} />
             <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => { postUpdate(t.id, val); setVal(''); }}>Post</button>
@@ -1905,7 +1905,7 @@ function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
         <div className="glass hero" style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 11, color: '#8f9ba7', marginBottom: 6 }}>{myOpen ? 'Currently punched in since' : 'Not punched in'}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>{myOpen ? 'Currently punched in since' : 'Not punched in'}</div>
               <div style={{ fontSize: 26, fontWeight: 800 }}>{myOpen ? new Date(myOpen.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
             </div>
             <button className="acid-btn" style={{ marginLeft: 'auto' }} onClick={() => (myOpen ? punchOut(myOpen.id) : punchIn())}>
@@ -1968,7 +1968,7 @@ function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
             })}
           </div>
 
-          <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 10.5, color: '#8f9ba7', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, fontSize: 10.5, color: 'var(--text-faint)', justifyContent: 'center' }}>
             <span><span className="cal-legend-dot present" /> Present</span>
             <span><span className="cal-legend-dot absent" /> Absent</span>
             <span><span className="cal-legend-dot today" /> Today</span>
@@ -2009,7 +2009,7 @@ function Wishlist({ role, wishlist, addWishlistItem, toggleWishlistItem, deleteW
         {pending.length ? pending.map((w: WishlistItem) => (
           <div key={w.id} className="rem-item">
             <span onClick={() => toggleWishlistItem(w.id, true)} style={{ cursor: 'pointer', flex: 1 }}>
-              ☐ {w.text} <span style={{ color: '#73818d', fontSize: 10 }}>— added by {w.added_by === 'director' ? 'Director' : 'EA'}</span>
+              ☐ {w.text} <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>— added by {w.added_by === 'director' ? 'Director' : 'EA'}</span>
             </span>
             <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
           </div>
@@ -2328,7 +2328,7 @@ function CostTicketCard({ ticket, addTicketOption, selectFinalVendor, deleteCost
     <div className="glass card-block" style={{ marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div>
-          <h3 style={{ margin: 0 }}>{ticket.item_name} <span style={{ color: '#8f9ba7', fontWeight: 400, fontSize: 14 }}>× {ticket.quantity}</span></h3>
+          <h3 style={{ margin: 0 }}>{ticket.item_name} <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 14 }}>× {ticket.quantity}</span></h3>
           <div className="sub" style={{ fontSize: 12, marginTop: 4 }}>
             Existing: <b>{ticket.existing_vendor || 'Current vendor'}</b> @ ₹{ticket.existing_rate}/unit
           </div>
@@ -2341,7 +2341,7 @@ function CostTicketCard({ ticket, addTicketOption, selectFinalVendor, deleteCost
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,.04)', borderRadius: 12, border: '1px solid var(--line)' }}>
-          <span style={{ fontSize: 12.5 }}>{ticket.existing_vendor || 'Current vendor'} <span style={{ color: '#8f9ba7' }}>(existing)</span></span>
+          <span style={{ fontSize: 12.5 }}>{ticket.existing_vendor || 'Current vendor'} <span style={{ color: 'var(--text-faint)' }}>(existing)</span></span>
           <b>₹{ticket.existing_rate}</b>
         </div>
         {ticket.options.map((o: CostTicketOption) => {
