@@ -43,6 +43,20 @@ export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authError, setAuthError] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    const saved = (typeof window !== 'undefined' && localStorage.getItem('desk_theme')) as 'dark' | 'light' | null;
+    const initial = saved || 'dark';
+    setTheme(initial);
+    if (typeof document !== 'undefined') document.documentElement.setAttribute('data-theme', initial);
+  }, []);
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('desk_theme', next);
+    document.documentElement.setAttribute('data-theme', next);
+  }
 
   const [tab, setTab] = useState<Tab>('overview');
   const [taskFocus, setTaskFocus] = useState<{ kind: 'ring' | 'single'; key?: string; label?: string; id?: string } | null>(null);
@@ -444,7 +458,7 @@ export default function Home() {
 
   if (loading) return <div className="center-loading">Loading The Desk…</div>;
   if (!session || !profile) {
-    return <LoginGate onLogin={login} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} />;
+    return <LoginGate onLogin={login} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
   return (
@@ -487,6 +501,8 @@ export default function Home() {
         toasts={toasts}
         notifPermission={notifPermission}
         requestNotifPermission={requestNotifPermission}
+        theme={theme}
+        toggleTheme={toggleTheme}
       />
       {reminderAlerts.length > 0 && (
         <div className="reminder-alert-stack">
@@ -536,11 +552,14 @@ function ReminderAlertCard({ alert, onView, onDismiss, onSnooze }: any) {
   );
 }
 
-function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
+function LoginGate({ onLogin, error, busy, needsProfile, onLogout, theme, toggleTheme }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   return (
     <div className="gate">
+      <button className="theme-toggle" onClick={toggleTheme} style={{ position: 'absolute', top: 24, right: 24, width: 'auto', padding: '9px 15px' }}>
+        {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+      </button>
       <div className="welcome-card">
         <span className="pill"><i className="dot" /> The Desk — secure sign in</span>
         <h1>Sign in to your desk.</h1>
@@ -574,7 +593,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const navItems =
@@ -627,6 +646,9 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         </nav>
         {!collapsed && (
           <div className="sidebar-foot">
+            <button className="theme-toggle" onClick={toggleTheme}>
+              {theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'}
+            </button>
             {notifPermission !== 'granted' && (
               <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>🔔 Enable notifications</button>
             )}
