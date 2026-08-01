@@ -33,7 +33,8 @@ type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat' | 'att
 type AttendanceRow = { id: string; role: Role; punch_in: string; punch_out: string | null; created_at: string };
 type WishlistItem = { id: string; text: string; added_by: Role; done: boolean; created_at: string };
 type Expense = { id: string; uploaded_by: Role; description: string | null; amount: number; receipt_url: string | null; receipt_name: string | null; expense_date: string; created_at: string };
-type CostComparison = { id: string; item_name: string; quantity: number; existing_vendor: string | null; existing_rate: number; new_vendor: string | null; new_rate: number; created_by: Role; created_at: string };
+type CostTicketOption = { id: string; ticket_id: string; vendor_name: string; rate: number; created_at: string };
+type CostTicket = { id: string; item_name: string; quantity: number; existing_vendor: string | null; existing_rate: number; selected_option_id: string | null; created_by: Role; created_at: string; options: CostTicketOption[] };
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
@@ -52,7 +53,7 @@ export default function Home() {
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [costComparisons, setCostComparisons] = useState<CostComparison[]>([]);
+  const [costTickets, setCostTickets] = useState<CostTicket[]>([]);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [unread, setUnread] = useState(0);
 
@@ -328,21 +329,40 @@ export default function Home() {
     loadExpenses();
   }
 
-  async function loadCostComparisons() {
-    const { data, error } = await supabase.from('cost_comparisons').select('*').order('created_at', { ascending: false });
-    if (error) { console.error('loadCostComparisons failed:', error.message); return; }
-    if (data) setCostComparisons(data as CostComparison[]);
+  async function loadCostTickets() {
+    const { data: tickets, error } = await supabase.from('cost_tickets').select('*').order('created_at', { ascending: false });
+    if (error) { console.error('loadCostTickets failed:', error.message); return; }
+    const { data: options, error: optErr } = await supabase.from('cost_ticket_options').select('*').order('created_at', { ascending: true });
+    if (optErr) { console.error('loadCostTickets options failed:', optErr.message); return; }
+    if (tickets) {
+      const merged = (tickets as any[]).map((t) => ({
+        ...t,
+        options: (options || []).filter((o: any) => o.ticket_id === t.id),
+      }));
+      setCostTickets(merged as CostTicket[]);
+    }
   }
-  async function addCostComparison(payload: { item_name: string; quantity: number; existing_vendor: string; existing_rate: number; new_vendor: string; new_rate: number }) {
+  async function addCostTicket(payload: { item_name: string; quantity: number; existing_vendor: string; existing_rate: number }) {
     if (!profile) return;
-    const { error } = await supabase.from('cost_comparisons').insert({ ...payload, created_by: profile.role });
-    if (error) { toast('⚠️ Could not save comparison: ' + error.message); return; }
-    toast('Cost comparison saved.');
-    loadCostComparisons();
+    const { error } = await supabase.from('cost_tickets').insert({ ...payload, created_by: profile.role });
+    if (error) { toast('⚠️ Could not create ticket: ' + error.message); return; }
+    toast('Comparison ticket created.');
+    loadCostTickets();
   }
-  async function deleteCostComparison(id: string) {
-    await supabase.from('cost_comparisons').delete().eq('id', id);
-    loadCostComparisons();
+  async function addTicketOption(ticketId: string, vendorName: string, rate: number) {
+    const { error } = await supabase.from('cost_ticket_options').insert({ ticket_id: ticketId, vendor_name: vendorName, rate });
+    if (error) { toast('⚠️ Could not add vendor option: ' + error.message); return; }
+    loadCostTickets();
+  }
+  async function selectFinalVendor(ticketId: string, optionId: string) {
+    const { error } = await supabase.from('cost_tickets').update({ selected_option_id: optionId }).eq('id', ticketId);
+    if (error) { toast('⚠️ Could not select vendor: ' + error.message); return; }
+    toast('Final vendor selected — savings recorded.');
+    loadCostTickets();
+  }
+  async function deleteCostTicket(id: string) {
+    await supabase.from('cost_tickets').delete().eq('id', id);
+    loadCostTickets();
   }
 
   useEffect(() => {
@@ -354,7 +374,7 @@ export default function Home() {
     loadAttendance();
     loadWishlist();
     loadExpenses();
-    loadCostComparisons();
+    loadCostTickets();
     const lastRead = Number(localStorage.getItem('desk_notif_read_' + profile.role) || 0);
 
     const channel = supabase
@@ -367,7 +387,8 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => loadAttendance())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wishlist_items' }, () => loadWishlist())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => loadExpenses())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cost_comparisons' }, () => loadCostComparisons())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cost_tickets' }, () => loadCostTickets())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cost_ticket_options' }, () => loadCostTickets())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -454,16 +475,17 @@ export default function Home() {
         expenses={expenses}
         addExpense={addExpense}
         deleteExpense={deleteExpense}
-        costComparisons={costComparisons}
-        addCostComparison={addCostComparison}
-        deleteCostComparison={deleteCostComparison}
+        costTickets={costTickets}
+        addCostTicket={addCostTicket}
+        addTicketOption={addTicketOption}
+        selectFinalVendor={selectFinalVendor}
+        deleteCostTicket={deleteCostTicket}
         profile={profile}
         toast={toast}
         reload={{ loadTasks, loadReminders, loadChat, loadNotifs }}
         toasts={toasts}
         notifPermission={notifPermission}
         requestNotifPermission={requestNotifPermission}
-        sendTestNotification={sendTestNotification}
       />
       {reminderAlerts.length > 0 && (
         <div className="reminder-alert-stack">
@@ -551,7 +573,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costComparisons, addCostComparison, deleteCostComparison, profile, toast, reload, toasts, notifPermission, requestNotifPermission, sendTestNotification }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const navItems =
@@ -563,6 +585,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'reminders', label: 'Reminders', ic: '◷' },
           { id: 'attendance', label: 'Attendance', ic: '🕐' },
           { id: 'expense', label: 'Expense', ic: '₹' },
+          { id: 'costimprovement', label: 'Cost Improvement', ic: '↓' },
           { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
@@ -573,16 +596,16 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'reminders', label: 'Reminders', ic: '◷' },
           { id: 'attendance', label: 'Attendance', ic: '🕐' },
           { id: 'expense', label: 'Expense', ic: '₹' },
+          { id: 'costimprovement', label: 'Cost Improvement', ic: '↓' },
           { id: 'wishlist', label: 'Wishlist', ic: '★' },
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
         ];
 
-  const statusLabel = notifPermission === 'granted' ? 'Notifications on' : notifPermission === 'denied' ? 'Notifications blocked' : 'Notifications off';
-  const statusColor = notifPermission === 'granted' ? 'var(--mint)' : notifPermission === 'denied' ? 'var(--rose)' : 'var(--amber)';
   const unseenNotifs = (notifs || []).filter((n: Notif) => !n.seen);
 
   return (
+    <>
     <div className={'app-shell' + (collapsed ? ' sidebar-collapsed' : '')}>
       <aside className="sidebar">
         <div className="brand">
@@ -603,52 +626,18 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         </nav>
         {!collapsed && (
           <div className="sidebar-foot">
-            <span className="pill" style={{ color: statusColor, borderColor: statusColor }} title="This is a per-browser setting — shared across every tab/login using this browser">
-              <i className="dot" style={{ background: statusColor, boxShadow: 'none' }} /> {statusLabel}
-            </span>
-            <div className="top-actions">
-              {notifPermission !== 'granted' && (
-                <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>Enable notifications</button>
-              )}
-              {notifPermission === 'granted' && (
-                <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={sendTestNotification}>Send test</button>
-              )}
-            </div>
+            {notifPermission !== 'granted' && (
+              <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>🔔 Enable notifications</button>
+            )}
             <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
             <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
           </div>
         )}
       </aside>
       <div className="main-content">
-        <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
-          🔔
-          {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
-        </button>
-        {bellOpen && (
-          <div className="bell-panel bell-panel-fixed">
-            <div className="bell-panel-head">
-              <span>Notifications</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
-                <button className="bell-dismiss" onClick={() => setBellOpen(false)} title="Close" style={{ fontSize: 15 }}>✕</button>
-              </div>
-            </div>
-            <div className="bell-panel-list">
-              {(notifs || []).length ? notifs.map((n: Notif) => (
-                <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
-                  <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
-                    {n.text}
-                    <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
-                </div>
-              )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
-            </div>
-          </div>
-        )}
         <main>
           <section className="section">
-            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costComparisons={costComparisons} />}
+            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costTickets={costTickets} />}
             {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
             {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
@@ -656,7 +645,8 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
             {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
             {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
-            {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} costComparisons={costComparisons} addCostComparison={addCostComparison} deleteCostComparison={deleteCostComparison} toast={toast} />}
+            {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} toast={toast} />}
+            {tab === 'costimprovement' && <CostImprovementPage role={role} costTickets={costTickets} addCostTicket={addCostTicket} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} toast={toast} />}
           </section>
         </main>
       </div>
@@ -664,6 +654,33 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         {toasts.map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>
     </div>
+    <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
+      🔔
+      {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
+    </button>
+    {bellOpen && (
+      <div className="bell-panel bell-panel-fixed">
+        <div className="bell-panel-head">
+          <span>Notifications</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+            <button className="bell-dismiss" onClick={() => setBellOpen(false)} title="Close" style={{ fontSize: 15 }}>✕</button>
+          </div>
+        </div>
+        <div className="bell-panel-list">
+          {(notifs || []).length ? notifs.map((n: Notif) => (
+            <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
+              <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
+                {n.text}
+                <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+              </div>
+              {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
+            </div>
+          )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -695,7 +712,7 @@ function Ring({ value, total, color, label, sub, onClick }: any) {
 // =========================================================
 // Dashboard — shared landing page for both Director and EA
 // =========================================================
-function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, costComparisons }: any) {
+function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, costTickets }: any) {
   const total = tasks.length;
   const done = tasks.filter((t: Task) => t.status === 'completed').length;
   const progress = tasks.filter((t: Task) => !['captured', 'completed'].includes(t.status)).length;
@@ -895,10 +912,14 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
           };
           const m = meta[c] || meta.Tasks;
           const savedHere = c === 'Cost Improvement'
-            ? (costComparisons || []).reduce((sum: number, cc: CostComparison) => sum + (cc.existing_rate - cc.new_rate) * cc.quantity, 0)
+            ? (costTickets || []).reduce((sum: number, t: CostTicket) => {
+                if (!t.selected_option_id) return sum;
+                const opt = t.options.find((o) => o.id === t.selected_option_id);
+                return opt ? sum + (t.existing_rate - opt.rate) * t.quantity : sum;
+              }, 0)
             : null;
           return (
-            <button key={c} className="category-card" style={{ borderTop: `4px solid ${m.accent}` }} onClick={() => c === 'Cost Improvement' ? setTab('expense') : goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
+            <button key={c} className="category-card" style={{ borderTop: `4px solid ${m.accent}` }} onClick={() => c === 'Cost Improvement' ? setTab('costimprovement') : goToTasks({ kind: 'ring', key: 'category:' + c, label: c })}>
               <div className="cc-top">
                 <span className="cc-index">{String(i + 1).padStart(2, '0')} / CORE</span>
                 <span className="cc-icon" style={{ background: m.accent + '22', color: m.accent }}>{m.icon}</span>
@@ -931,11 +952,15 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
               <i className="dot" style={{ background: 'var(--mint)', boxShadow: 'none' }} /> Cost savings identified
             </span>
             <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 4 }}>
-              ₹{(costComparisons || []).reduce((s: number, c: CostComparison) => s + (c.existing_rate - c.new_rate) * c.quantity, 0).toLocaleString('en-IN')}
+              ₹{(costTickets || []).reduce((s: number, t: CostTicket) => {
+                if (!t.selected_option_id) return s;
+                const opt = t.options.find((o) => o.id === t.selected_option_id);
+                return opt ? s + (t.existing_rate - opt.rate) * t.quantity : s;
+              }, 0).toLocaleString('en-IN')}
             </div>
             <p className="sub" style={{ fontSize: 12 }}>
-              {(costComparisons || []).length} vendor comparison{(costComparisons || []).length !== 1 ? 's' : ''} logged
-              {' · '}<span onClick={() => setTab('expense')} style={{ cursor: 'pointer', color: 'var(--acid)' }}>Review →</span>
+              {(costTickets || []).filter((t: CostTicket) => t.selected_option_id).length} of {(costTickets || []).length} comparison{(costTickets || []).length !== 1 ? 's' : ''} finalized
+              {' · '}<span onClick={() => setTab('costimprovement')} style={{ cursor: 'pointer', color: 'var(--acid)' }}>Review →</span>
             </p>
           </div>
         </div>
@@ -1978,7 +2003,7 @@ function Wishlist({ role, wishlist, addWishlistItem, toggleWishlistItem, deleteW
 // =========================================================
 // Expense — invoice/bill uploads + vendor cost comparison
 // =========================================================
-function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costComparisons, addCostComparison, deleteCostComparison, toast }: any) {
+function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, toast }: any) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
@@ -1988,13 +2013,6 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
   const fileRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<'day' | 'week' | 'month' | 'all'>('month');
   const [generating, setGenerating] = useState(false);
-
-  const [itemName, setItemName] = useState('');
-  const [qty, setQty] = useState('1');
-  const [existingVendor, setExistingVendor] = useState('');
-  const [existingRate, setExistingRate] = useState('');
-  const [newVendor, setNewVendor] = useState('');
-  const [newRate, setNewRate] = useState('');
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -2015,15 +2033,6 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
     addExpense({ description: desc.trim(), amount: amt, expense_date: expenseDate, receipt_url: receiptUrl, receipt_name: receiptName });
     setDesc(''); setAmount(''); setReceiptUrl(null); setReceiptName(null);
     if (fileRef.current) fileRef.current.value = '';
-  }
-
-  function submitComparison() {
-    const q = parseFloat(qty) || 1;
-    const er = parseFloat(existingRate);
-    const nr = parseFloat(newRate);
-    if (!itemName.trim() || !er || !nr) { toast('Fill in item name and both rates.'); return; }
-    addCostComparison({ item_name: itemName.trim(), quantity: q, existing_vendor: existingVendor.trim(), existing_rate: er, new_vendor: newVendor.trim(), new_rate: nr });
-    setItemName(''); setQty('1'); setExistingVendor(''); setExistingRate(''); setNewVendor(''); setNewRate('');
   }
 
   const now = new Date();
@@ -2127,15 +2136,12 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
     setGenerating(false);
   }
 
-  const totalSaved = (costComparisons || []).reduce((sum: number, c: CostComparison) => sum + (c.existing_rate - c.new_rate) * c.quantity, 0);
-
   return (
     <>
       <div className="eyebrow">Finance</div>
-      <h2>Expense &amp; cost improvement.</h2>
-      <p className="sub">Every invoice, and every rupee saved by comparing vendors — both visible to the Director in real time.</p>
+      <h2>Expense log.</h2>
+      <p className="sub">Every invoice the EA uploads — visible to the Director in real time, filterable by period.</p>
 
-      {/* ---------- Log expense ---------- */}
       <div className="glass hero" style={{ marginBottom: 20 }}>
         <h3 style={{ marginBottom: 14 }}>Log an expense</h3>
         <div className="form-grid" style={{ marginBottom: 12 }}>
@@ -2161,7 +2167,7 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
         </div>
       </div>
 
-      <div className="glass card-block" style={{ marginBottom: 30 }}>
+      <div className="glass card-block">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
           <h3 style={{ margin: 0 }}>Expense log</h3>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -2197,11 +2203,54 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
           </div>
         )) : <div className="empty">No expenses in this period.</div>}
       </div>
+    </>
+  );
+}
 
-      {/* ---------- Cost comparison / vendor savings ---------- */}
+// =========================================================
+// Cost Improvement — multi-vendor comparison tickets
+// Existing vendor is fixed; add several alternative vendor
+// quotes, then pick the final winner to lock in the savings.
+// =========================================================
+function CostImprovementPage({ role, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, toast }: any) {
+  const [itemName, setItemName] = useState('');
+  const [qty, setQty] = useState('1');
+  const [existingVendor, setExistingVendor] = useState('');
+  const [existingRate, setExistingRate] = useState('');
+
+  function fmtMoney(n: number) {
+    return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+
+  function submitTicket() {
+    const q = parseFloat(qty) || 1;
+    const er = parseFloat(existingRate);
+    if (!itemName.trim() || !er) { toast('Enter the item name and the existing rate.'); return; }
+    addCostTicket({ item_name: itemName.trim(), quantity: q, existing_vendor: existingVendor.trim(), existing_rate: er });
+    setItemName(''); setQty('1'); setExistingVendor(''); setExistingRate('');
+  }
+
+  const totalSaved = (costTickets || []).reduce((sum: number, t: CostTicket) => {
+    if (!t.selected_option_id) return sum;
+    const opt = t.options.find((o) => o.id === t.selected_option_id);
+    return opt ? sum + (t.existing_rate - opt.rate) * t.quantity : sum;
+  }, 0);
+  const finalizedCount = (costTickets || []).filter((t: CostTicket) => t.selected_option_id).length;
+
+  return (
+    <>
+      <div className="eyebrow">Finance</div>
+      <h2>Cost improvement.</h2>
+      <p className="sub">Compare the current vendor against several alternatives for the same purchase — pick a winner to lock in the savings.</p>
+
+      <div className="kpi-strip">
+        <div className="kpi"><small>Savings identified</small><strong style={{ color: 'var(--mint)' }}>{fmtMoney(totalSaved)}</strong><span>from finalized tickets</span></div>
+        <div className="kpi"><small>Tickets</small><strong>{finalizedCount} / {(costTickets || []).length}</strong><span>finalized</span></div>
+      </div>
+
       <div className="glass hero" style={{ marginBottom: 20 }}>
-        <h3 style={{ marginBottom: 14 }}>Compare vendor pricing</h3>
-        <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Log the existing vendor's rate against a cheaper alternative — savings are calculated automatically.</p>
+        <h3 style={{ marginBottom: 14 }}>New comparison ticket</h3>
+        <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>Start with what you're already buying and from whom — you'll add alternative vendor quotes to it next.</p>
         <div className="form-grid" style={{ marginBottom: 12 }}>
           <div className="full">
             <label className="field-label">Item / service</label>
@@ -2214,52 +2263,90 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, costC
           <div></div>
           <div>
             <label className="field-label">Existing vendor</label>
-            <input className="input" value={existingVendor} onChange={(e) => setExistingVendor(e.target.value)} placeholder="Vendor name" />
+            <input className="input" value={existingVendor} onChange={(e) => setExistingVendor(e.target.value)} placeholder="Where you buy this today" />
           </div>
           <div>
             <label className="field-label">Existing rate (₹ / unit)</label>
             <input className="input" type="number" value={existingRate} onChange={(e) => setExistingRate(e.target.value)} placeholder="0.00" />
           </div>
-          <div>
-            <label className="field-label">New vendor</label>
-            <input className="input" value={newVendor} onChange={(e) => setNewVendor(e.target.value)} placeholder="Vendor name" />
-          </div>
-          <div>
-            <label className="field-label">New rate (₹ / unit)</label>
-            <input className="input" type="number" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="0.00" />
-          </div>
         </div>
-        {existingRate && newRate && (
-          <div className="sub" style={{ fontSize: 12.5, marginBottom: 14 }}>
-            Saves <b style={{ color: 'var(--mint)' }}>{fmtMoney((parseFloat(existingRate) - parseFloat(newRate)) * (parseFloat(qty) || 1))}</b> on this comparison
-          </div>
-        )}
-        <button className="acid-btn" onClick={submitComparison}>Save comparison →</button>
+        <button className="acid-btn" onClick={submitTicket}>Create ticket →</button>
       </div>
 
-      <div className="glass card-block">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>Savings identified</h3>
-          <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--mint)' }}>{fmtMoney(totalSaved)}</span>
+      {(costTickets || []).length ? costTickets.map((t: CostTicket) => (
+        <CostTicketCard key={t.id} ticket={t} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} fmtMoney={fmtMoney} />
+      )) : <div className="empty">No comparison tickets yet.</div>}
+    </>
+  );
+}
+
+function CostTicketCard({ ticket, addTicketOption, selectFinalVendor, deleteCostTicket, fmtMoney }: any) {
+  const [vendorName, setVendorName] = useState('');
+  const [rate, setRate] = useState('');
+  const finalized = !!ticket.selected_option_id;
+  const selectedOption = finalized ? ticket.options.find((o: CostTicketOption) => o.id === ticket.selected_option_id) : null;
+  const savings = selectedOption ? (ticket.existing_rate - selectedOption.rate) * ticket.quantity : null;
+
+  function submitOption() {
+    const r = parseFloat(rate);
+    if (!vendorName.trim() || !r) return;
+    addTicketOption(ticket.id, vendorName.trim(), r);
+    setVendorName(''); setRate('');
+  }
+
+  return (
+    <div className="glass card-block" style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>{ticket.item_name} <span style={{ color: '#8f9ba7', fontWeight: 400, fontSize: 14 }}>× {ticket.quantity}</span></h3>
+          <div className="sub" style={{ fontSize: 12, marginTop: 4 }}>
+            Existing: <b>{ticket.existing_vendor || 'Current vendor'}</b> @ ₹{ticket.existing_rate}/unit
+          </div>
         </div>
-        {(costComparisons || []).length ? costComparisons.map((c: CostComparison) => {
-          const saved = (c.existing_rate - c.new_rate) * c.quantity;
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {finalized && <span className="pill status-completed">✓ Finalized</span>}
+          <button className="tiny-btn" onClick={() => deleteCostTicket(ticket.id)}>✕</button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,.04)', borderRadius: 12, border: '1px solid var(--line)' }}>
+          <span style={{ fontSize: 12.5 }}>{ticket.existing_vendor || 'Current vendor'} <span style={{ color: '#8f9ba7' }}>(existing)</span></span>
+          <b>₹{ticket.existing_rate}</b>
+        </div>
+        {ticket.options.map((o: CostTicketOption) => {
+          const isSelected = o.id === ticket.selected_option_id;
+          const optSavings = (ticket.existing_rate - o.rate) * ticket.quantity;
           return (
-            <div key={c.id} className="leverage-row">
-              <div>
-                <div className="leverage-title">{c.item_name} <span style={{ color: '#8f9ba7', fontWeight: 400 }}>× {c.quantity}</span></div>
-                <div className="leverage-sub">
-                  {c.existing_vendor || 'Existing'} @ ₹{c.existing_rate} → {c.new_vendor || 'New vendor'} @ ₹{c.new_rate}
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                <b style={{ color: saved >= 0 ? 'var(--mint)' : 'var(--rose)' }}>{saved >= 0 ? '+' : ''}{fmtMoney(saved)}</b>
-                <button className="tiny-btn" onClick={() => deleteCostComparison(c.id)}>✕</button>
+            <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isSelected ? 'rgba(101,237,189,.10)' : 'rgba(255,255,255,.04)', borderRadius: 12, border: isSelected ? '1px solid rgba(101,237,189,.4)' : '1px solid var(--line)' }}>
+              <span style={{ fontSize: 12.5 }}>{o.vendor_name}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 11, color: optSavings >= 0 ? 'var(--mint)' : 'var(--rose)' }}>
+                  {optSavings >= 0 ? 'saves' : 'costs +'} {fmtMoney(Math.abs(optSavings))}
+                </span>
+                <b>₹{o.rate}</b>
+                {!ticket.selected_option_id ? (
+                  <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => selectFinalVendor(ticket.id, o.id)}>Select</button>
+                ) : isSelected ? (
+                  <span className="pill status-completed" style={{ padding: '3px 9px' }}>Winner</span>
+                ) : null}
               </div>
             </div>
           );
-        }) : <div className="empty">No comparisons logged yet.</div>}
+        })}
       </div>
-    </>
+
+      {finalized ? (
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--mint)' }}>
+          Finalized with {selectedOption?.vendor_name} — saved {fmtMoney(savings || 0)}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input className="input" style={{ flex: 1, minWidth: 140 }} value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder="Alternative vendor name" />
+          <input className="input" type="number" style={{ maxWidth: 130 }} value={rate} onChange={(e) => setRate(e.target.value)} placeholder="Rate (₹/unit)" />
+          <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={submitOption}>+ Add quote</button>
+        </div>
+      )}
+    </div>
   );
 }
