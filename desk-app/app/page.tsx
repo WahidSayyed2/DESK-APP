@@ -3,7 +3,6 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 
 type Role = 'director' | 'ea';
@@ -658,27 +657,6 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         )}
       </aside>
       <div className="main-content">
-        <main>
-          <section className="section">
-            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costTickets={costTickets} />}
-            {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
-            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
-            {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
-            {tab === 'ai' && <AIPortal role={role} />}
-            {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
-            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
-            {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
-            {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} toast={toast} />}
-            {tab === 'costimprovement' && <CostImprovementPage role={role} costTickets={costTickets} addCostTicket={addCostTicket} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} toast={toast} />}
-          </section>
-        </main>
-      </div>
-      <div className="toast-stack">
-        {toasts.map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
-      </div>
-    </div>
-    {typeof document !== 'undefined' && createPortal(
-      <>
         <button className="bell-fab" onClick={() => setBellOpen((b) => !b)} title="Notifications">
           🔔
           {unseenNotifs.length > 0 && <span className="badge">{unseenNotifs.length}</span>}
@@ -705,9 +683,25 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             </div>
           </div>
         )}
-      </>,
-      document.body
-    )}
+        <main>
+          <section className="section">
+            {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costTickets={costTickets} />}
+            {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
+            {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
+            {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
+            {tab === 'ai' && <AIPortal role={role} />}
+            {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
+            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
+            {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
+            {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} toast={toast} />}
+            {tab === 'costimprovement' && <CostImprovementPage role={role} costTickets={costTickets} addCostTicket={addCostTicket} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} toast={toast} />}
+          </section>
+        </main>
+      </div>
+      <div className="toast-stack">
+        {toasts.map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
+      </div>
+    </div>
     </>
   );
 }

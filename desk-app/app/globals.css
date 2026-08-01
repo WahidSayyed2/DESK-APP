@@ -84,11 +84,11 @@ button{cursor:pointer}
 .sidebar-toggle:hover{border-color:var(--acid);color:var(--acid)}
 .app-shell.sidebar-collapsed .sidebar-toggle{position:static;margin-left:0}
 
-.bell-fab{position:fixed;top:22px;right:28px;z-index:150;width:42px;height:42px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--text-mid);font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.bell-fab{position:absolute;top:22px;right:28px;z-index:150;width:42px;height:42px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--text-mid);font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .bell-fab:hover{border-color:var(--acid);transform:translateY(-1px)}
 .bell-fab .badge{position:absolute;top:-4px;right:-4px;background:var(--rose);color:#2a0810;font-size:9px;font-weight:900;padding:2px 6px;border-radius:20px}
 .bell-panel{width:320px;max-height:420px;overflow-y:auto;background:#0e1620;border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);z-index:200}
-.bell-panel-fixed{position:fixed;top:70px;right:28px}
+.bell-panel-fixed{position:absolute;top:70px;right:28px}
 .bell-panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;color:var(--text-mid)}
 .bell-panel-list{display:flex;flex-direction:column}
 .bell-item{display:flex;align-items:flex-start;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer}
@@ -108,7 +108,7 @@ button{cursor:pointer}
 .top-actions{display:flex;flex-direction:column;align-items:stretch;gap:8px}
 .live{display:flex;align-items:center;gap:8px;color:var(--text-mid);font-size:11px;white-space:nowrap;padding:8px 4px}
 .live i{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 18px rgba(101,237,189,.85);display:inline-block;flex-shrink:0;font-style:normal}
-.main-content{flex:1;min-width:0;overflow-x:hidden}
+.main-content{flex:1;min-width:0;overflow-x:hidden;position:relative}
 
 main{flex:1}
 .section{padding:34px 4vw 70px;position:relative;max-width:1300px}
