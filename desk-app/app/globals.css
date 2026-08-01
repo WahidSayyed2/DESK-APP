@@ -116,6 +116,8 @@ h1,h2,h3,p{margin-top:0}
 .reminder-alert-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;color:var(--acid);margin-bottom:4px}
 .reminder-alert-text{font-size:14px;font-weight:700;color:#fff;line-height:1.4}
 .reminder-alert-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.snooze-row{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.snooze-row .tiny-btn{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.15)}
 .reminder-alert-actions button{white-space:nowrap;padding:8px 12px;font-size:11px}
 
 .hero{border-radius:34px;padding:32px;background:radial-gradient(circle at 88% 12%,rgba(169,156,255,.30),transparent 28%),radial-gradient(circle at 62% 86%,rgba(114,228,255,.16),transparent 26%),linear-gradient(145deg,#152230,#0b151f 58%,#111927);position:relative;overflow:hidden}

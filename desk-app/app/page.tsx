@@ -117,6 +117,13 @@ export default function Home() {
   function dismissReminderAlert(id: string) {
     setReminderAlerts((a) => a.filter((r) => r.id !== id));
   }
+  async function snoozeReminder(alertId: string, taskId: string, minutes: number) {
+    const when = new Date(Date.now() + minutes * 60000).toISOString();
+    await supabase.from('tasks').update({ reminder_at: when }).eq('id', taskId);
+    dismissReminderAlert(alertId);
+    toast(`Snoozed — will remind again in ${minutes} min.`);
+    loadTasks();
+  }
 
   function sendTestNotification() {
     if (typeof window === 'undefined' || !('Notification' in window)) { toast('This browser does not support notifications.'); return; }
@@ -461,22 +468,13 @@ export default function Home() {
       {reminderAlerts.length > 0 && (
         <div className="reminder-alert-stack">
           {reminderAlerts.map((r) => (
-            <div className="reminder-alert" key={r.id}>
-              <div className="reminder-alert-icon">⏰</div>
-              <div className="reminder-alert-body">
-                <div className="reminder-alert-title">Reminder</div>
-                <div className="reminder-alert-text">{r.title}</div>
-              </div>
-              <div className="reminder-alert-actions">
-                <button
-                  className="acid-btn"
-                  onClick={() => { setTab('tasks'); setTaskFocus({ kind: 'single', id: r.taskId }); dismissReminderAlert(r.id); }}
-                >
-                  View task
-                </button>
-                <button className="soft-btn" onClick={() => dismissReminderAlert(r.id)}>Dismiss</button>
-              </div>
-            </div>
+            <ReminderAlertCard
+              key={r.id}
+              alert={r}
+              onView={() => { setTab('tasks'); setTaskFocus({ kind: 'single', id: r.taskId }); dismissReminderAlert(r.id); }}
+              onDismiss={() => dismissReminderAlert(r.id)}
+              onSnooze={(minutes: number) => snoozeReminder(r.id, r.taskId, minutes)}
+            />
           ))}
         </div>
       )}
@@ -487,6 +485,34 @@ export default function Home() {
 // =========================================================
 // Login gate
 // =========================================================
+// =========================================================
+// Reminder alert card — with a snooze picker (5/10/15/30 min)
+// =========================================================
+function ReminderAlertCard({ alert, onView, onDismiss, onSnooze }: any) {
+  const [showSnooze, setShowSnooze] = useState(false);
+  return (
+    <div className="reminder-alert">
+      <div className="reminder-alert-icon">⏰</div>
+      <div className="reminder-alert-body">
+        <div className="reminder-alert-title">Reminder</div>
+        <div className="reminder-alert-text">{alert.title}</div>
+        {showSnooze && (
+          <div className="snooze-row">
+            {[5, 10, 15, 30].map((m) => (
+              <button key={m} className="tiny-btn" onClick={() => onSnooze(m)}>{m}m</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="reminder-alert-actions">
+        <button className="acid-btn" onClick={onView}>View task</button>
+        <button className="soft-btn" onClick={() => setShowSnooze((s) => !s)}>Snooze</button>
+        <button className="soft-btn" onClick={onDismiss}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
 function LoginGate({ onLogin, error, busy, needsProfile, onLogout }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -602,7 +628,10 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           <div className="bell-panel bell-panel-fixed">
             <div className="bell-panel-head">
               <span>Notifications</span>
-              {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {unseenNotifs.length > 0 && <button className="tiny-btn" onClick={markAllNotifsSeen}>Mark all seen</button>}
+                <button className="bell-dismiss" onClick={() => setBellOpen(false)} title="Close" style={{ fontSize: 15 }}>✕</button>
+              </div>
             </div>
             <div className="bell-panel-list">
               {(notifs || []).length ? notifs.map((n: Notif) => (
