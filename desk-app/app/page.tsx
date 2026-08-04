@@ -265,6 +265,10 @@ export default function Home() {
     await supabase.from('notifications').update({ seen: true }).eq('recipient_role', profile.role).eq('seen', false);
     loadNotifs();
   }
+  async function deleteNotif(id: string) {
+    await supabase.from('notifications').delete().eq('id', id);
+    loadNotifs();
+  }
 
   async function loadAttendance() {
     const { data, error } = await supabase.from('attendance').select('*').order('punch_in', { ascending: false });
@@ -477,6 +481,7 @@ export default function Home() {
         chat={chat}
         notifs={notifs}
         markNotifSeen={markNotifSeen}
+        deleteNotif={deleteNotif}
         markAllNotifsSeen={markAllNotifsSeen}
         notifyRole={notifyRole}
         attendance={attendance}
@@ -592,7 +597,7 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout, theme, toggle
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
+function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, deleteNotif, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const navItems =
@@ -674,11 +679,14 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             <div className="bell-panel-list">
               {(notifs || []).length ? notifs.map((n: Notif) => (
                 <div key={n.id} className={'bell-item' + (n.seen ? ' seen' : '')}>
-                  <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); } markNotifSeen(n.id); setBellOpen(false); }}>
+                  <div className="bell-item-text" onClick={() => { if (n.task_id) { setTab('tasks'); setTaskFocus({ kind: 'single', id: n.task_id }); setBellOpen(false); } }}>
                     {n.text}
                     <div className="bell-item-time">{new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
-                  {!n.seen && <button className="bell-dismiss" onClick={() => markNotifSeen(n.id)} title="Mark as seen">✕</button>}
+                  <div className="bell-actions">
+                    {!n.seen && <button className="bell-tick" onClick={() => markNotifSeen(n.id)} title="Mark as read">✓</button>}
+                    <button className="bell-cross" onClick={() => deleteNotif(n.id)} title="Remove">✕</button>
+                  </div>
                 </div>
               )) : <div className="empty" style={{ padding: 20 }}>Nothing yet.</div>}
             </div>
@@ -1098,6 +1106,11 @@ function NewTask({ role, toast, reload, notifyRole }: any) {
   const [busy, setBusy] = useState(false);
   const recRef = useRef<any>(null);
 
+  const [bulkRows, setBulkRows] = useState<any[]>([]);
+  const [bulkFileName, setBulkFileName] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
@@ -1149,6 +1162,63 @@ function NewTask({ role, toast, reload, notifyRole }: any) {
     reload.loadTasks();
   }
 
+  // ---------- bulk CSV import ----------
+  function downloadTemplate() {
+    const csv = 'title,description,category,priority,due_date\n' +
+      'Prep board deck,Slides for the quarterly review,Tasks,high,2026-08-15\n' +
+      'Renew office AMC,Follow up with vendor,Operations,medium,\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'the-desk-bulk-task-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleBulkFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkFileName(file.name);
+    const Papa = (await import('papaparse')).default;
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results: any) => {
+        const rows = (results.data as any[])
+          .filter((r) => r.title && r.title.trim())
+          .map((r) => ({
+            title: r.title.trim(),
+            description: (r.description || '').trim(),
+            category: (CATEGORIES as string[]).includes(r.category) ? r.category : 'Tasks',
+            priority: ['low', 'medium', 'high', 'critical'].includes((r.priority || '').toLowerCase()) ? r.priority.toLowerCase() : 'medium',
+            due_date: r.due_date && r.due_date.trim() ? r.due_date.trim() : null,
+          }));
+        setBulkRows(rows);
+        if (!rows.length) toast('No valid rows found — make sure each row has a "title" column filled in.');
+      },
+      error: (err: any) => toast('⚠️ Could not read that file: ' + err.message),
+    });
+  }
+
+  async function importBulk() {
+    if (!bulkRows.length) return;
+    setBulkBusy(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const payload = bulkRows.map((r) => ({ ...r, status: 'captured', created_by: userData.user?.id }));
+    const { data: inserted, error } = await supabase.from('tasks').insert(payload).select();
+    setBulkBusy(false);
+    if (error) { toast('⚠️ Bulk import failed: ' + error.message); return; }
+    const otherRole = role === 'director' ? 'ea' : 'director';
+    await notifyRole(otherRole, `${inserted?.length || bulkRows.length} tasks imported in bulk`, null);
+    toast(`Imported ${inserted?.length || bulkRows.length} tasks — all in Captured.`);
+    setBulkRows([]); setBulkFileName('');
+    if (bulkFileRef.current) bulkFileRef.current.value = '';
+    reload.loadTasks();
+  }
+
   return (
     <>
       <div className="eyebrow">Capture</div>
@@ -1193,6 +1263,41 @@ function NewTask({ role, toast, reload, notifyRole }: any) {
             <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
         </div>
+      </div>
+
+      <div className="glass card-block" style={{ marginTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
+          <h3 style={{ margin: 0 }}>Bulk import</h3>
+          <button className="soft-btn" onClick={downloadTemplate}>⬇ Download CSV template</button>
+        </div>
+        <p className="sub" style={{ fontSize: 12, marginBottom: 16 }}>
+          Upload a CSV to add many tasks at once — every row lands straight in "Captured." Columns: <code>title</code> (required), <code>description</code>, <code>category</code>, <code>priority</code>, <code>due_date</code>.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="soft-btn" onClick={() => bulkFileRef.current?.click()}>
+            {bulkFileName ? `📎 ${bulkFileName}` : '📎 Choose CSV file'}
+          </button>
+          <input ref={bulkFileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleBulkFile} />
+          {bulkRows.length > 0 && (
+            <button className="acid-btn" disabled={bulkBusy} onClick={importBulk}>
+              {bulkBusy ? 'Importing…' : `Import ${bulkRows.length} task${bulkRows.length !== 1 ? 's' : ''} →`}
+            </button>
+          )}
+        </div>
+
+        {bulkRows.length > 0 && (
+          <div style={{ marginTop: 16, maxHeight: 260, overflowY: 'auto' }}>
+            {bulkRows.map((r, i) => (
+              <div key={i} className="leverage-row">
+                <div>
+                  <div className="leverage-title">{r.title}</div>
+                  <div className="leverage-sub">{r.category} · {r.priority}{r.due_date ? ' · Due ' + r.due_date : ''}</div>
+                </div>
+                <button className="tiny-btn" onClick={() => setBulkRows((rows) => rows.filter((_, idx) => idx !== i))}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );

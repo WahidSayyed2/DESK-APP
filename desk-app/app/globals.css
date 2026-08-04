@@ -87,17 +87,21 @@ button{cursor:pointer}
 .bell-fab{position:absolute;top:22px;right:28px;z-index:150;width:42px;height:42px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--text-mid);font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .bell-fab:hover{border-color:var(--acid);transform:translateY(-1px)}
 .bell-fab .badge{position:absolute;top:-4px;right:-4px;background:var(--rose);color:#2a0810;font-size:9px;font-weight:900;padding:2px 6px;border-radius:20px}
-.bell-panel{width:320px;max-height:420px;overflow-y:auto;background:#0e1620;border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);z-index:200}
+.bell-panel{width:320px;max-height:440px;overflow-y:auto;background:#0e1620;border:1px solid rgba(255,255,255,.10);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);z-index:200}
 .bell-panel-fixed{position:absolute;top:70px;right:28px}
-.bell-panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;color:var(--text-mid)}
+.bell-panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.10);font-size:12px;font-weight:800;color:#eef2f5}
 .bell-panel-list{display:flex;flex-direction:column}
-.bell-item{display:flex;align-items:flex-start;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer}
+.bell-item{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
 .bell-item:hover{background:rgba(255,255,255,.04)}
-.bell-item.seen{opacity:.45}
-.bell-item-text{flex:1;font-size:12px;color:var(--text-mid);line-height:1.5}
-.bell-item-time{font-size:9.5px;color:var(--text-faint);margin-top:3px;font-family:ui-monospace,monospace}
-.bell-dismiss{background:none;border:0;color:var(--text-faint);font-size:12px;flex-shrink:0;padding:2px}
-.bell-dismiss:hover{color:var(--rose)}
+.bell-item.seen{opacity:.5}
+.bell-item-text{flex:1;font-size:12px;color:#eef2f5;line-height:1.5;cursor:pointer}
+.bell-item-time{font-size:9.5px;color:#8a96a3;margin-top:3px;font-family:ui-monospace,monospace}
+.bell-actions{display:flex;gap:5px;flex-shrink:0}
+.bell-tick,.bell-cross{width:22px;height:22px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#c7cfd6;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.bell-tick:hover{background:rgba(101,237,189,.25);border-color:rgba(101,237,189,.5);color:#8ff0cf}
+.bell-cross:hover{background:rgba(255,99,125,.25);border-color:rgba(255,99,125,.5);color:#ff9aaa}
+.bell-dismiss{background:none;border:0;color:#8a96a3;font-size:12px;flex-shrink:0;padding:2px}
+.bell-dismiss:hover{color:#ff9aaa}
 .brandmark{width:38px;height:38px;border-radius:14px;background:linear-gradient(145deg,#ffc2d1,#ff6f91 60%,#c9184a);display:grid;place-items:center;font-size:14px;box-shadow:0 14px 34px rgba(255,111,145,.35);flex-shrink:0}
 .nav{display:flex;flex-direction:column;gap:4px;flex:1}
 .nav button{font-size:12.5px;color:var(--text-faint);padding:11px 13px;border:1px solid transparent;border-radius:12px;transition:.15s;background:transparent;white-space:nowrap;display:flex;align-items:center;gap:10px;text-align:left;font-weight:600}
