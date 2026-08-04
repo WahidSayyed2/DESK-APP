@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 type Role = 'director' | 'ea';
+type AppRole = 'director' | 'ea' | 'admin';
 type Category = 'Tasks' | 'Operations' | 'Development' | 'Cost Improvement';
 const CATEGORIES: Category[] = ['Tasks', 'Operations', 'Development', 'Cost Improvement'];
 type Stage = 'captured' | 'progress' | 'followup' | 'update' | 'closure' | 'completed';
@@ -27,7 +28,7 @@ type TaskUpdate = { id: string; task_id: string; by_role: Role; text: string; cr
 type Reminder = { id: string; owner_role: Role; text: string; freq: 'day' | 'week' | 'month'; created_at: string };
 type ChatMessage = { id: string; from_role: Role; text: string; created_at: string; attachment_url?: string | null; attachment_name?: string | null };
 type Notif = { id: string; recipient_role: Role; text: string; task_id: string | null; seen: boolean; created_at: string };
-type Profile = { id: string; role: Role; name: string };
+type Profile = { id: string; role: AppRole; name: string };
 
 type Tab = 'overview' | 'newtask' | 'tasks' | 'reminders' | 'ai' | 'chat' | 'attendance' | 'wishlist' | 'expense';
 type AttendanceRow = { id: string; role: Role; punch_in: string; punch_out: string | null; created_at: string };
@@ -464,10 +465,14 @@ export default function Home() {
     return <LoginGate onLogin={login} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
+  if (profile.role === 'admin') {
+    return <AdminPanel profile={profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} toast={toast} toasts={toasts} />;
+  }
+
   return (
     <>
       <Shell
-        role={profile.role}
+        role={profile.role as Role}
         tab={tab}
         setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); if (t !== 'tasks') setTaskFocus(null); }}
         goToTasks={(focus: any) => { setTab('tasks'); setTaskFocus(focus || null); markTasksRead(); }}
@@ -589,6 +594,135 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout, theme, toggle
             </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// =========================================================
+// Super Admin — full backend visibility and data management
+// =========================================================
+const ADMIN_TABLES = [
+  { key: 'tasks', label: 'Tasks', note: 'Also clears their updates and linked notifications automatically.' },
+  { key: 'chat_messages', label: 'Chat messages', note: 'Director \u2194 EA direct chat history.' },
+  { key: 'attendance', label: 'Attendance', note: 'All punch in/out records.' },
+  { key: 'expenses', label: 'Expenses', note: 'Logged invoices/bills (does not delete uploaded files in storage).' },
+  { key: 'cost_tickets', label: 'Cost improvement tickets', note: 'Also clears their vendor quote options automatically.' },
+  { key: 'wishlist_items', label: 'Wishlist items', note: 'Shared wishlist entries.' },
+  { key: 'reminders', label: 'Reminders', note: 'Personal reminders for both desks.' },
+  { key: 'notifications', label: 'Notifications', note: 'Bell notification history for both desks.' },
+];
+
+function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: any) {
+  const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [loadingCounts, setLoadingCounts] = useState(true);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [confirmText, setConfirmText] = useState('');
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  async function loadAll() {
+    setLoadingCounts(true);
+    const next: Record<string, number | null> = {};
+    for (const t of ADMIN_TABLES) {
+      const { count, error } = await supabase.from(t.key).select('*', { count: 'exact', head: true });
+      next[t.key] = error ? null : (count ?? 0);
+    }
+    setCounts(next);
+    const { data: profs } = await supabase.from('profiles').select('*').order('role', { ascending: true });
+    setProfiles(profs || []);
+    setLoadingCounts(false);
+  }
+
+  useEffect(() => { loadAll(); }, []);
+
+  async function clearTable(key: string) {
+    setBusyKey(key);
+    const { error } = await supabase.from(key).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    setBusyKey(null);
+    setConfirmKey(null);
+    setConfirmText('');
+    if (error) { toast('⚠️ Failed to clear: ' + error.message); return; }
+    toast(`Cleared all rows in "${key}".`);
+    loadAll();
+  }
+
+  const confirmTable = ADMIN_TABLES.find((t) => t.key === confirmKey);
+
+  return (
+    <div className="admin-shell">
+      <header className="admin-top">
+        <div className="brand"><div className="brandmark">A</div> SUPER ADMIN</div>
+        <div className="top-actions">
+          <button className="theme-toggle" onClick={toggleTheme} style={{ width: 'auto', padding: '9px 15px' }}>
+            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+          </button>
+          <span className="live"><i /> {profile.name || 'Admin'}</span>
+          <button className="soft-btn" onClick={onLogout}>Sign out</button>
+        </div>
+      </header>
+
+      <section className="section" style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div className="eyebrow">Full backend access</div>
+        <h2>Everything, in one place.</h2>
+        <p className="sub">Live row counts across every table. Clearing data here is permanent — each action requires typing the table name to confirm.</p>
+
+        <div className="glass card-block" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginBottom: 14 }}>Registered accounts</h3>
+          {profiles.length ? profiles.map((p) => (
+            <div key={p.id} className="leverage-row">
+              <div>
+                <div className="leverage-title">{p.name || '(no name set)'}</div>
+                <div className="leverage-sub">{p.role} · {p.id}</div>
+              </div>
+            </div>
+          )) : <div className="empty">{loadingCounts ? 'Loading…' : 'No profiles found.'}</div>}
+        </div>
+
+        <div className="admin-grid">
+          {ADMIN_TABLES.map((t) => (
+            <div key={t.key} className="glass card-block admin-card">
+              <div className="admin-card-count">{loadingCounts ? '…' : counts[t.key] === null ? '—' : counts[t.key]}</div>
+              <div className="admin-card-label">{t.label}</div>
+              <p className="sub" style={{ fontSize: 11, marginBottom: 16, minHeight: 32 }}>{t.note}</p>
+              <button
+                className="danger-btn"
+                style={{ width: '100%' }}
+                disabled={!counts[t.key]}
+                onClick={() => { setConfirmKey(t.key); setConfirmText(''); }}
+              >
+                Clear all
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {confirmKey && confirmTable && (
+        <div className="admin-modal-backdrop" onClick={() => setConfirmKey(null)}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 8 }}>Clear "{confirmTable.label}"?</h3>
+            <p className="sub" style={{ fontSize: 12.5, marginBottom: 16 }}>
+              This permanently deletes all {counts[confirmKey]} row{counts[confirmKey] === 1 ? '' : 's'} in <code>{confirmKey}</code>. {confirmTable.note} This cannot be undone.
+            </p>
+            <label className="field-label">Type <b>{confirmKey}</b> to confirm</label>
+            <input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} style={{ marginBottom: 16 }} autoFocus />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="soft-btn" onClick={() => setConfirmKey(null)}>Cancel</button>
+              <button
+                className="danger-btn"
+                disabled={confirmText !== confirmKey || busyKey === confirmKey}
+                onClick={() => clearTable(confirmKey)}
+              >
+                {busyKey === confirmKey ? 'Clearing…' : 'Permanently clear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="toast-stack">
+        {(toasts || []).map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>
     </div>
   );
