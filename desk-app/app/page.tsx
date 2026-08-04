@@ -621,6 +621,12 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
   const [confirmText, setConfirmText] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
+  const [newName, setNewName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<'director' | 'ea' | 'admin'>('ea');
+  const [creating, setCreating] = useState(false);
+
   async function loadAll() {
     setLoadingCounts(true);
     const next: Record<string, number | null> = {};
@@ -635,6 +641,25 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
   }
 
   useEffect(() => { loadAll(); }, []);
+
+  async function createUser() {
+    if (!newEmail.trim() || !newPassword) { toast('Enter an email and password.'); return; }
+    if (newPassword.length < 6) { toast('Password needs to be at least 6 characters.'); return; }
+    setCreating(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    const resp = await fetch('/api/admin/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: newEmail.trim(), password: newPassword, name: newName.trim(), role: newRole, accessToken }),
+    });
+    const data = await resp.json();
+    setCreating(false);
+    if (!resp.ok || data.error) { toast('⚠️ ' + (data.error || 'Could not create the account.')); return; }
+    toast(`Account created for ${newEmail} as ${newRole}.`);
+    setNewName(''); setNewEmail(''); setNewPassword(''); setNewRole('ea');
+    loadAll();
+  }
 
   async function clearTable(key: string) {
     setBusyKey(key);
@@ -653,7 +678,7 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
     <div className="admin-shell">
       <header className="admin-top">
         <div className="brand"><div className="brandmark">A</div> SUPER ADMIN</div>
-        <div className="top-actions">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <button className="theme-toggle" onClick={toggleTheme} style={{ width: 'auto', padding: '9px 15px' }}>
             {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
           </button>
@@ -667,16 +692,50 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
         <h2>Everything, in one place.</h2>
         <p className="sub">Live row counts across every table. Clearing data here is permanent — each action requires typing the table name to confirm.</p>
 
-        <div className="glass card-block" style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 14 }}>Registered accounts</h3>
-          {profiles.length ? profiles.map((p) => (
-            <div key={p.id} className="leverage-row">
-              <div>
-                <div className="leverage-title">{p.name || '(no name set)'}</div>
-                <div className="leverage-sub">{p.role} · {p.id}</div>
-              </div>
+        <div className="glass hero" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginBottom: 6 }}>Create a new login</h3>
+          <p className="sub" style={{ fontSize: 12, marginBottom: 18 }}>
+            Add as many Directors and EAs as you need — each gets their own real email/password login and role, no need to touch Supabase directly.
+          </p>
+          <div className="form-grid" style={{ marginBottom: 14 }}>
+            <div>
+              <label className="field-label">Full name</label>
+              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Priya Shah" />
             </div>
-          )) : <div className="empty">{loadingCounts ? 'Loading…' : 'No profiles found.'}</div>}
+            <div>
+              <label className="field-label">Role</label>
+              <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as any)}>
+                <option value="director">Director</option>
+                <option value="ea">Executive Assistant</option>
+                <option value="admin">Super Admin</option>
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Email</label>
+              <input className="input" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@company.com" />
+            </div>
+            <div>
+              <label className="field-label">Password</label>
+              <input className="input" type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 6 characters" />
+            </div>
+          </div>
+          <button className="acid-btn" disabled={creating} onClick={createUser}>
+            {creating ? 'Creating…' : 'Create login →'}
+          </button>
+        </div>
+
+        <div className="glass card-block" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginBottom: 14 }}>Registered accounts ({profiles.length})</h3>
+          <div className="scroll-box">
+            {profiles.length ? profiles.map((p) => (
+              <div key={p.id} className="leverage-row">
+                <div>
+                  <div className="leverage-title">{p.name || '(no name set)'}</div>
+                  <div className="leverage-sub">{p.role} · {p.id}</div>
+                </div>
+              </div>
+            )) : <div className="empty">{loadingCounts ? 'Loading…' : 'No profiles found.'}</div>}
+          </div>
         </div>
 
         <div className="admin-grid">
