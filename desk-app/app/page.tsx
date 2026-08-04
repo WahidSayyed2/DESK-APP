@@ -611,6 +611,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         ]
       : [
           { id: 'overview', label: 'Dashboard', ic: '◈' },
+          { id: 'newtask', label: 'Capture', ic: '✎' },
           { id: 'tasks', label: 'My Tasks', ic: '☰', badge: true },
           { id: 'reminders', label: 'Reminders', ic: '◷' },
           { id: 'attendance', label: 'Attendance', ic: '🕐' },
@@ -686,7 +687,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
         <main>
           <section className="section">
             {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costTickets={costTickets} />}
-            {tab === 'newtask' && <NewTask toast={toast} reload={reload} notifyRole={notifyRole} />}
+            {tab === 'newtask' && <NewTask role={role} toast={toast} reload={reload} notifyRole={notifyRole} />}
             {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
             {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
             {tab === 'ai' && <AIPortal role={role} />}
@@ -1088,7 +1089,7 @@ function Dashboard({ role, tasks, updates, setTab, goToTasks, unread, expenses, 
 // =========================================================
 // New task capture (voice/text -> task, direct, no AI)
 // =========================================================
-function NewTask({ toast, reload, notifyRole }: any) {
+function NewTask({ role, toast, reload, notifyRole }: any) {
   const [text, setText] = useState('');
   const [category, setCategory] = useState<Category>('Tasks');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
@@ -1141,9 +1142,10 @@ function NewTask({ toast, reload, notifyRole }: any) {
     }).select().single();
     setBusy(false);
     if (error) { toast('Could not save task: ' + error.message); return; }
-    if (inserted) await notifyRole('ea', `New task: "${inserted.title}"`, inserted.id);
+    const otherRole = role === 'director' ? 'ea' : 'director';
+    if (inserted) await notifyRole(otherRole, `New task: "${inserted.title}"`, inserted.id);
     setText(''); setCategory('Tasks'); setPriority('medium'); setDueDate('');
-    toast('Task sent to the EA.');
+    toast(role === 'director' ? 'Task sent to the EA.' : 'Task added — Director will see it live.');
     reload.loadTasks();
   }
 
@@ -1151,7 +1153,7 @@ function NewTask({ toast, reload, notifyRole }: any) {
     <>
       <div className="eyebrow">Capture</div>
       <h2>Turn a thought into a task.</h2>
-      <p className="sub">Type it or speak it — it goes straight to the EA, instantly.</p>
+      <p className="sub">{role === 'director' ? 'Type it or speak it — it goes straight to the EA, instantly.' : 'Type it or speak it — it lands on the shared board instantly, and the Director sees it live.'}</p>
       <div className="glass hero">
         <div className="capture">
           <button className={'mic-btn' + (listening ? ' live' : '')} onClick={toggleMic} title="Speak">🎙️</button>
