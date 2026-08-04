@@ -1652,7 +1652,7 @@ function Reminders({ role, reminders, reload }: any) {
           <button className="acid-btn" style={{ flexShrink: 0 }} onClick={add}>Add</button>
         </div>
       </div>
-      <div style={{ marginTop: 20 }}>
+      <div className="scroll-box" style={{ marginTop: 20 }}>
         {!reminders.length && <div className="empty">No reminders yet.</div>}
         {['day', 'week', 'month'].map((f) => groups[f].length ? (
           <div className="rem-group" key={f}>
@@ -2106,26 +2106,28 @@ function Wishlist({ role, wishlist, addWishlistItem, toggleWishlistItem, deleteW
         </div>
       </div>
       <div className="glass card-block">
-        <h3 style={{ marginBottom: 14 }}>Pending ({pending.length})</h3>
-        {pending.length ? pending.map((w: WishlistItem) => (
-          <div key={w.id} className="rem-item">
-            <span onClick={() => toggleWishlistItem(w.id, true)} style={{ cursor: 'pointer', flex: 1 }}>
-              ☐ {w.text} <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>— added by {w.added_by === 'director' ? 'Director' : 'EA'}</span>
-            </span>
-            <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
-          </div>
-        )) : <div className="empty">Nothing pending.</div>}
-        {done.length > 0 && (
-          <>
-            <h3 style={{ margin: '22px 0 14px' }}>Done ({done.length})</h3>
-            {done.map((w: WishlistItem) => (
-              <div key={w.id} className="rem-item" style={{ opacity: .55 }}>
-                <span onClick={() => toggleWishlistItem(w.id, false)} style={{ cursor: 'pointer', flex: 1, textDecoration: 'line-through' }}>☑ {w.text}</span>
-                <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
-              </div>
-            ))}
-          </>
-        )}
+        <div className="scroll-box">
+          <h3 style={{ marginBottom: 14 }}>Pending ({pending.length})</h3>
+          {pending.length ? pending.map((w: WishlistItem) => (
+            <div key={w.id} className="rem-item">
+              <span onClick={() => toggleWishlistItem(w.id, true)} style={{ cursor: 'pointer', flex: 1 }}>
+                ☐ {w.text} <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>— added by {w.added_by === 'director' ? 'Director' : 'EA'}</span>
+              </span>
+              <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
+            </div>
+          )) : <div className="empty">Nothing pending.</div>}
+          {done.length > 0 && (
+            <>
+              <h3 style={{ margin: '22px 0 14px' }}>Done ({done.length})</h3>
+              {done.map((w: WishlistItem) => (
+                <div key={w.id} className="rem-item" style={{ opacity: .55 }}>
+                  <span onClick={() => toggleWishlistItem(w.id, false)} style={{ cursor: 'pointer', flex: 1, textDecoration: 'line-through' }}>☑ {w.text}</span>
+                  <button onClick={() => deleteWishlistItem(w.id)}>✕</button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       </div>
     </>
   );
@@ -2313,26 +2315,28 @@ function ExpensePage({ role, profile, expenses, addExpense, deleteExpense, toast
         <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 4 }}>{fmtMoney(filteredTotal)}</div>
         <div className="sub" style={{ fontSize: 12, marginBottom: 18 }}>{filtered.length} invoice{filtered.length !== 1 ? 's' : ''} in this period</div>
 
-        {filtered.length ? filtered.map((e: Expense) => (
-          <div key={e.id} className="leverage-row">
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              {e.receipt_url && isImage(e.receipt_name) && (
-                <a href={e.receipt_url} target="_blank" rel="noreferrer"><img src={e.receipt_url} alt="" style={{ width: 42, height: 42, borderRadius: 8, objectFit: 'cover' }} /></a>
-              )}
-              <div>
-                <div className="leverage-title">{e.description || 'Expense'}</div>
-                <div className="leverage-sub">
-                  {new Date(e.expense_date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} · {e.uploaded_by === 'ea' ? 'EA' : 'Director'}
-                  {e.receipt_url && !isImage(e.receipt_name) && <> · <a href={e.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--acid)' }}>📎 receipt</a></>}
+        <div className="scroll-box">
+          {filtered.length ? filtered.map((e: Expense) => (
+            <div key={e.id} className="leverage-row">
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                {e.receipt_url && isImage(e.receipt_name) && (
+                  <a href={e.receipt_url} target="_blank" rel="noreferrer"><img src={e.receipt_url} alt="" style={{ width: 42, height: 42, borderRadius: 8, objectFit: 'cover' }} /></a>
+                )}
+                <div>
+                  <div className="leverage-title">{e.description || 'Expense'}</div>
+                  <div className="leverage-sub">
+                    {new Date(e.expense_date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} · {e.uploaded_by === 'ea' ? 'EA' : 'Director'}
+                    {e.receipt_url && !isImage(e.receipt_name) && <> · <a href={e.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--acid)' }}>📎 receipt</a></>}
+                  </div>
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                <b>{fmtMoney(Number(e.amount))}</b>
+                <button className="tiny-btn" onClick={() => deleteExpense(e.id)}>✕</button>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-              <b>{fmtMoney(Number(e.amount))}</b>
-              <button className="tiny-btn" onClick={() => deleteExpense(e.id)}>✕</button>
-            </div>
-          </div>
-        )) : <div className="empty">No expenses in this period.</div>}
+          )) : <div className="empty">No expenses in this period.</div>}
+        </div>
       </div>
     </>
   );
@@ -2404,9 +2408,11 @@ function CostImprovementPage({ role, costTickets, addCostTicket, addTicketOption
         <button className="acid-btn" onClick={submitTicket}>Create ticket →</button>
       </div>
 
-      {(costTickets || []).length ? costTickets.map((t: CostTicket) => (
-        <CostTicketCard key={t.id} ticket={t} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} fmtMoney={fmtMoney} />
-      )) : <div className="empty">No comparison tickets yet.</div>}
+      <div className="scroll-box" style={{ maxHeight: 640 }}>
+        {(costTickets || []).length ? costTickets.map((t: CostTicket) => (
+          <CostTicketCard key={t.id} ticket={t} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} fmtMoney={fmtMoney} />
+        )) : <div className="empty">No comparison tickets yet.</div>}
+      </div>
     </>
   );
 }
