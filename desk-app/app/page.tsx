@@ -274,7 +274,8 @@ export default function Home() {
     loadNotifs();
   }
   async function deleteNotif(id: string) {
-    await supabase.from('notifications').delete().eq('id', id);
+    const { error } = await supabase.from('notifications').delete().eq('id', id);
+    if (error) { toast('⚠️ Could not remove: ' + error.message); return; }
     loadNotifs();
   }
 
@@ -334,7 +335,8 @@ export default function Home() {
     loadWishlist();
   }
   async function deleteWishlistItem(id: string) {
-    await supabase.from('wishlist_items').delete().eq('id', id);
+    const { error } = await supabase.from('wishlist_items').delete().eq('id', id);
+    if (error) { toast('⚠️ Could not remove: ' + error.message); return; }
     loadWishlist();
   }
 
@@ -351,7 +353,8 @@ export default function Home() {
     loadExpenses();
   }
   async function deleteExpense(id: string) {
-    await supabase.from('expenses').delete().eq('id', id);
+    const { error } = await supabase.from('expenses').delete().eq('id', id);
+    if (error) { toast('⚠️ Could not remove: ' + error.message); return; }
     loadExpenses();
   }
 
@@ -387,7 +390,8 @@ export default function Home() {
     loadCostTickets();
   }
   async function deleteCostTicket(id: string) {
-    await supabase.from('cost_tickets').delete().eq('id', id);
+    const { error } = await supabase.from('cost_tickets').delete().eq('id', id);
+    if (error) { toast('⚠️ Could not remove: ' + error.message); return; }
     loadCostTickets();
   }
 
@@ -1588,8 +1592,12 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRol
   }
   async function deleteTaskPermanently(id: string) {
     const t = tasks.find((x: Task) => x.id === id);
-    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    const { data: deletedRows, error } = await supabase.from('tasks').delete().eq('id', id).select();
     if (error) { toast('⚠️ Could not delete: ' + error.message); return; }
+    if (!deletedRows || deletedRows.length === 0) {
+      toast('⚠️ Delete was blocked by a database permission — nothing was removed. Check the tasks DELETE policy in Supabase.');
+      return;
+    }
     if (t) await notifyRole(otherRole, `"${t.title}" was deleted`, null);
     toast('Task deleted.');
     if (focus?.kind === 'single' && focus.id === id) setFocus(null);
