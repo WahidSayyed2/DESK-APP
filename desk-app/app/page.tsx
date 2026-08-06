@@ -274,8 +274,12 @@ export default function Home() {
     loadNotifs();
   }
   async function deleteNotif(id: string) {
-    const { error } = await supabase.from('notifications').delete().eq('id', id);
+    const { data: deletedRows, error } = await supabase.from('notifications').delete().eq('id', id).select();
     if (error) { toast('⚠️ Could not remove: ' + error.message); return; }
+    if (!deletedRows || deletedRows.length === 0) {
+      toast('⚠️ Delete was blocked by a database permission — check the notifications DELETE policy in Supabase.');
+      return;
+    }
     loadNotifs();
   }
 
