@@ -44,6 +44,7 @@ export default function Home() {
   const [authError, setAuthError] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [actingRole, setActingRole] = useState<Role>('director');
 
   useEffect(() => {
     const saved = (typeof window !== 'undefined' && localStorage.getItem('desk_theme')) as 'dark' | 'light' | null;
@@ -182,6 +183,12 @@ export default function Home() {
       .then(({ data, error }) => {
         if (error || !data) { setAuthError('This login has no role assigned yet. Ask your admin to add a profiles row for this account.'); return; }
         setProfile(data as Profile);
+        if (data.role === 'director' || data.role === 'ea') {
+          setActingRole(data.role as Role);
+        } else {
+          const saved = (typeof window !== 'undefined' && localStorage.getItem('desk_admin_acting_role')) as Role | null;
+          setActingRole(saved === 'ea' ? 'ea' : 'director');
+        }
       });
   }, [session]);
 
@@ -197,7 +204,7 @@ export default function Home() {
   async function loadTasks() {
     const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
     if (data) {
-      if (profile?.role === 'ea' && prevTaskCount.current !== null && data.length > prevTaskCount.current) {
+      if (actingRole === 'ea' && prevTaskCount.current !== null && data.length > prevTaskCount.current) {
         const newest = [...data].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
         pushNotify('📌 New task from the Director', newest?.title || '');
       }
@@ -206,7 +213,7 @@ export default function Home() {
     }
     const { data: upd } = await supabase.from('task_updates').select('*').order('created_at', { ascending: true });
     if (upd) {
-      if (profile?.role === 'director' && prevUpdateCount.current !== null && upd.length > prevUpdateCount.current) {
+      if (actingRole === 'director' && prevUpdateCount.current !== null && upd.length > prevUpdateCount.current) {
         const newOnes = upd.slice(prevUpdateCount.current).filter((u: any) => u.by_role === 'ea');
         if (newOnes.length) {
           const t = data?.find((x: any) => x.id === newOnes[newOnes.length - 1].task_id);
@@ -219,7 +226,7 @@ export default function Home() {
   }
   async function loadReminders() {
     if (!profile) return;
-    const { data } = await supabase.from('reminders').select('*').eq('owner_role', profile.role).order('created_at', { ascending: true });
+    const { data } = await supabase.from('reminders').select('*').eq('owner_role', actingRole).order('created_at', { ascending: true });
     if (data) setReminders(data as Reminder[]);
   }
   async function loadChat() {
@@ -227,7 +234,7 @@ export default function Home() {
     if (data) {
       if (prevChatCount.current !== null && data.length > prevChatCount.current) {
         const newest = data[data.length - 1] as any;
-        if (newest.from_role !== profile?.role && tabRef.current !== 'chat') pushNotify('💬 New message', newest.text);
+        if (newest.from_role !== actingRole && tabRef.current !== 'chat') pushNotify('💬 New message', newest.text);
       }
       prevChatCount.current = data.length;
       setChat(data as ChatMessage[]);
@@ -236,7 +243,7 @@ export default function Home() {
   const prevNotifCount = useRef<number | null>(null);
   async function loadNotifs() {
     if (!profile) return;
-    const { data, error } = await supabase.from('notifications').select('*').eq('recipient_role', profile.role).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('notifications').select('*').eq('recipient_role', actingRole).order('created_at', { ascending: false });
     if (error) { console.error('loadNotifs failed:', error.message); return; }
     if (data) {
       const unseenNow = data.filter((n: any) => !n.seen).length;
@@ -263,7 +270,7 @@ export default function Home() {
   }
   async function markAllNotifsSeen() {
     if (!profile) return;
-    await supabase.from('notifications').update({ seen: true }).eq('recipient_role', profile.role).eq('seen', false);
+    await supabase.from('notifications').update({ seen: true }).eq('recipient_role', actingRole).eq('seen', false);
     loadNotifs();
   }
   async function deleteNotif(id: string) {
@@ -292,7 +299,7 @@ export default function Home() {
   }
   async function punchIn() {
     if (!profile) return;
-    const { error } = await supabase.from('attendance').insert({ role: profile.role, punch_in: new Date().toISOString() });
+    const { error } = await supabase.from('attendance').insert({ role: actingRole, punch_in: new Date().toISOString() });
     if (error) { toast('⚠️ Punch in failed: ' + error.message); return; }
     toast('Punched in.');
     loadAttendance();
@@ -318,7 +325,7 @@ export default function Home() {
   }
   async function addWishlistItem(text: string) {
     if (!profile || !text.trim()) return;
-    const { error } = await supabase.from('wishlist_items').insert({ text: text.trim(), added_by: profile.role });
+    const { error } = await supabase.from('wishlist_items').insert({ text: text.trim(), added_by: actingRole });
     if (error) { toast('⚠️ Could not add: ' + error.message); return; }
     loadWishlist();
   }
@@ -338,7 +345,7 @@ export default function Home() {
   }
   async function addExpense(payload: { description: string; amount: number; expense_date: string; receipt_url: string | null; receipt_name: string | null }) {
     if (!profile) return;
-    const { error } = await supabase.from('expenses').insert({ ...payload, uploaded_by: profile.role });
+    const { error } = await supabase.from('expenses').insert({ ...payload, uploaded_by: actingRole });
     if (error) { toast('⚠️ Could not save expense: ' + error.message); return; }
     toast('Expense logged.');
     loadExpenses();
@@ -363,7 +370,7 @@ export default function Home() {
   }
   async function addCostTicket(payload: { item_name: string; quantity: number; existing_vendor: string; existing_rate: number }) {
     if (!profile) return;
-    const { error } = await supabase.from('cost_tickets').insert({ ...payload, created_by: profile.role });
+    const { error } = await supabase.from('cost_tickets').insert({ ...payload, created_by: actingRole });
     if (error) { toast('⚠️ Could not create ticket: ' + error.message); return; }
     toast('Comparison ticket created.');
     loadCostTickets();
@@ -394,7 +401,7 @@ export default function Home() {
     loadWishlist();
     loadExpenses();
     loadCostTickets();
-    const lastRead = Number(localStorage.getItem('desk_notif_read_' + profile.role) || 0);
+    const lastRead = Number(localStorage.getItem('desk_notif_read_' + actingRole) || 0);
 
     const channel = supabase
       .channel('desk-realtime')
@@ -412,10 +419,10 @@ export default function Home() {
 
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+  }, [profile, actingRole]);
 
   useEffect(() => {
-    if (!profile || profile.role !== 'ea') return;
+    if (!profile || actingRole !== 'ea') return;
     const lastRead = Number(localStorage.getItem('desk_notif_read_ea') || 0);
     const n = tasks.filter((t) => new Date(t.created_at).getTime() > lastRead).length;
     setUnread(n);
@@ -443,7 +450,7 @@ export default function Home() {
   }, [tasks, profile]);
 
   function markTasksRead() {
-    if (profile?.role === 'ea') localStorage.setItem('desk_notif_read_ea', String(Date.now()));
+    if (actingRole === 'ea') localStorage.setItem('desk_notif_read_ea', String(Date.now()));
     setUnread(0);
   }
 
@@ -467,20 +474,23 @@ export default function Home() {
     await supabase.auth.signOut();
     setProfile(null);
   }
+  function switchActingRole(r: Role) {
+    setActingRole(r);
+    if (profile?.role === 'admin') localStorage.setItem('desk_admin_acting_role', r);
+    setTab('overview');
+  }
 
   if (loading) return <div className="center-loading">Loading The Desk…</div>;
   if (!session || !profile) {
     return <LoginGate onLogin={login} onLoginGoogle={loginWithGoogle} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
-  if (profile.role === 'admin') {
-    return <AdminPanel profile={profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} toast={toast} toasts={toasts} />;
-  }
-
   return (
     <>
       <Shell
-        role={profile.role as Role}
+        role={actingRole}
+        isSuperAdmin={profile.role === 'admin'}
+        switchActingRole={switchActingRole}
         tab={tab}
         setTab={(t: Tab) => { setTab(t); if (t === 'tasks') markTasksRead(); if (t !== 'tasks') setTaskFocus(null); }}
         goToTasks={(focus: any) => { setTab('tasks'); setTaskFocus(focus || null); markTasksRead(); }}
@@ -626,12 +636,11 @@ const ADMIN_TABLES = [
   { key: 'notifications', label: 'Notifications', note: 'Bell notification history for both desks.' },
 ];
 
-function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: any) {
+function AdminConsoleContent({ profile, toast }: any) {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(true);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
-  const [confirmText, setConfirmText] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
@@ -639,6 +648,7 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'director' | 'ea' | 'admin'>('ea');
   const [creating, setCreating] = useState(false);
+  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
 
   async function loadAll() {
     setLoadingCounts(true);
@@ -668,9 +678,18 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
     });
     const data = await resp.json();
     setCreating(false);
-    if (!resp.ok || data.error) { toast('⚠️ ' + (data.error || 'Could not create the account.')); return; }
+    if (!resp.ok || data.error) { toast('\u26a0\ufe0f ' + (data.error || 'Could not create the account.')); return; }
     toast(`Account created for ${newEmail} as ${newRole}.`);
     setNewName(''); setNewEmail(''); setNewPassword(''); setNewRole('ea');
+    loadAll();
+  }
+
+  async function deleteProfile(id: string) {
+    if (id === profile.id) { toast("You can't delete your own account while signed in."); setDeletingProfileId(null); return; }
+    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    setDeletingProfileId(null);
+    if (error) { toast('\u26a0\ufe0f Could not remove: ' + error.message); return; }
+    toast('Account removed. (Their login still exists in Supabase Auth \u2014 remove it there too if you want to fully delete it.)');
     loadAll();
   }
 
@@ -679,8 +698,7 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
     const { error } = await supabase.from(key).delete().neq('id', '00000000-0000-0000-0000-000000000000');
     setBusyKey(null);
     setConfirmKey(null);
-    setConfirmText('');
-    if (error) { toast('⚠️ Failed to clear: ' + error.message); return; }
+    if (error) { toast('\u26a0\ufe0f Failed to clear: ' + error.message); return; }
     toast(`Cleared all rows in "${key}".`);
     loadAll();
   }
@@ -688,125 +706,118 @@ function AdminPanel({ profile, onLogout, theme, toggleTheme, toast, toasts }: an
   const confirmTable = ADMIN_TABLES.find((t) => t.key === confirmKey);
 
   return (
-    <div className="admin-shell">
-      <header className="admin-top">
-        <div className="brand"><div className="brandmark">A</div> SUPER ADMIN</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <button className="theme-toggle" onClick={toggleTheme} style={{ width: 'auto', padding: '9px 15px' }}>
-            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
-          </button>
-          <span className="live"><i /> {profile.name || 'Admin'}</span>
-          <button className="soft-btn" onClick={onLogout}>Sign out</button>
-        </div>
-      </header>
+    <>
+      <div className="eyebrow">Full backend access</div>
+      <h2>Everything, in one place.</h2>
+      <p className="sub">Live row counts across every table \u2014 and full control over who has a login.</p>
 
-      <section className="section" style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <div className="eyebrow">Full backend access</div>
-        <h2>Everything, in one place.</h2>
-        <p className="sub">Live row counts across every table. Clearing data here is permanent — each action requires typing the table name to confirm.</p>
-
-        <div className="glass hero" style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 6 }}>Create a new login</h3>
-          <p className="sub" style={{ fontSize: 12, marginBottom: 18 }}>
-            Add as many Directors and EAs as you need — each gets their own real email/password login and role, no need to touch Supabase directly.
-          </p>
-          <div className="form-grid" style={{ marginBottom: 14 }}>
-            <div>
-              <label className="field-label">Full name</label>
-              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Priya Shah" />
-            </div>
-            <div>
-              <label className="field-label">Role</label>
-              <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as any)}>
-                <option value="director">Director</option>
-                <option value="ea">Executive Assistant</option>
-                <option value="admin">Super Admin</option>
-              </select>
-            </div>
-            <div>
-              <label className="field-label">Email</label>
-              <input className="input" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@company.com" />
-            </div>
-            <div>
-              <label className="field-label">Password</label>
-              <input className="input" type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 6 characters" />
-            </div>
+      <div className="glass hero" style={{ marginBottom: 24 }}>
+        <h3 style={{ marginBottom: 6 }}>Create a new login</h3>
+        <p className="sub" style={{ fontSize: 12, marginBottom: 18 }}>
+          Add as many Directors and EAs as you need \u2014 each gets their own real email/password login and role, no need to touch Supabase directly.
+        </p>
+        <div className="form-grid" style={{ marginBottom: 14 }}>
+          <div>
+            <label className="field-label">Full name</label>
+            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Priya Shah" />
           </div>
-          <button className="acid-btn" disabled={creating} onClick={createUser}>
-            {creating ? 'Creating…' : 'Create login →'}
-          </button>
+          <div>
+            <label className="field-label">Role</label>
+            <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value as any)}>
+              <option value="director">Director</option>
+              <option value="ea">Executive Assistant</option>
+              <option value="admin">Super Admin</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label">Email</label>
+            <input className="input" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@company.com" />
+          </div>
+          <div>
+            <label className="field-label">Password</label>
+            <input className="input" type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 6 characters" />
+          </div>
         </div>
+        <button className="acid-btn" disabled={creating} onClick={createUser}>
+          {creating ? 'Creating\u2026' : 'Create login \u2192'}
+        </button>
+      </div>
 
-        <div className="glass card-block" style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 14 }}>Registered accounts ({profiles.length})</h3>
-          <div className="scroll-box">
-            {profiles.length ? profiles.map((p) => (
-              <div key={p.id} className="leverage-row">
-                <div>
-                  <div className="leverage-title">{p.name || '(no name set)'}</div>
-                  <div className="leverage-sub">{p.role} · {p.id}</div>
-                </div>
+      <div className="glass card-block" style={{ marginBottom: 24 }}>
+        <h3 style={{ marginBottom: 14 }}>Registered accounts ({profiles.length})</h3>
+        <div className="scroll-box">
+          {profiles.length ? profiles.map((p) => (
+            <div key={p.id} className="leverage-row">
+              <div>
+                <div className="leverage-title">{p.name || '(no name set)'}{p.id === profile.id ? ' (you)' : ''}</div>
+                <div className="leverage-sub">{p.role} \u00b7 {p.id}</div>
               </div>
-            )) : <div className="empty">{loadingCounts ? 'Loading…' : 'No profiles found.'}</div>}
-          </div>
-        </div>
-
-        <div className="admin-grid">
-          {ADMIN_TABLES.map((t) => (
-            <div key={t.key} className="glass card-block admin-card">
-              <div className="admin-card-count">{loadingCounts ? '…' : counts[t.key] === null ? '—' : counts[t.key]}</div>
-              <div className="admin-card-label">{t.label}</div>
-              <p className="sub" style={{ fontSize: 11, marginBottom: 16, minHeight: 32 }}>{t.note}</p>
-              <button
-                className="danger-btn"
-                style={{ width: '100%' }}
-                disabled={!counts[t.key]}
-                onClick={() => { setConfirmKey(t.key); setConfirmText(''); }}
-              >
-                Clear all
-              </button>
+              {p.id !== profile.id && (
+                deletingProfileId === p.id ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="danger-btn" style={{ padding: '6px 12px', fontSize: 11 }} onClick={() => deleteProfile(p.id)}>Yes, remove</button>
+                    <button className="soft-btn" style={{ padding: '6px 12px', fontSize: 11 }} onClick={() => setDeletingProfileId(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <button className="tiny-btn" onClick={() => setDeletingProfileId(p.id)}>Remove access</button>
+                )
+              )}
             </div>
-          ))}
+          )) : <div className="empty">{loadingCounts ? 'Loading\u2026' : 'No profiles found.'}</div>}
         </div>
-      </section>
+      </div>
+
+      <div className="admin-grid">
+        {ADMIN_TABLES.map((t) => (
+          <div key={t.key} className="glass card-block admin-card">
+            <div className="admin-card-count">{loadingCounts ? '\u2026' : counts[t.key] === null ? '\u2014' : counts[t.key]}</div>
+            <div className="admin-card-label">{t.label}</div>
+            <p className="sub" style={{ fontSize: 11, marginBottom: 16, minHeight: 32 }}>{t.note}</p>
+            <button
+              className="danger-btn"
+              style={{ width: '100%' }}
+              disabled={!counts[t.key]}
+              onClick={() => setConfirmKey(t.key)}
+            >
+              Clear all
+            </button>
+          </div>
+        ))}
+      </div>
 
       {confirmKey && confirmTable && (
         <div className="admin-modal-backdrop" onClick={() => setConfirmKey(null)}>
           <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginBottom: 8 }}>Clear "{confirmTable.label}"?</h3>
-            <p className="sub" style={{ fontSize: 12.5, marginBottom: 16 }}>
+            <p className="sub" style={{ fontSize: 12.5, marginBottom: 20 }}>
               This permanently deletes all {counts[confirmKey]} row{counts[confirmKey] === 1 ? '' : 's'} in <code>{confirmKey}</code>. {confirmTable.note} This cannot be undone.
             </p>
-            <label className="field-label">Type <b>{confirmKey}</b> to confirm</label>
-            <input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} style={{ marginBottom: 16 }} autoFocus />
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="soft-btn" onClick={() => setConfirmKey(null)}>Cancel</button>
               <button
                 className="danger-btn"
-                disabled={confirmText !== confirmKey || busyKey === confirmKey}
+                disabled={busyKey === confirmKey}
                 onClick={() => clearTable(confirmKey)}
               >
-                {busyKey === confirmKey ? 'Clearing…' : 'Permanently clear'}
+                {busyKey === confirmKey ? 'Clearing\u2026' : 'Yes, delete all'}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      <div className="toast-stack">
-        {(toasts || []).map((t: any) => <div key={t.id} className="toast">{t.text}</div>)}
-      </div>
-    </div>
+    </>
   );
 }
+
 
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, deleteNotif, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
+function Shell({ role, isSuperAdmin, switchActingRole, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, deleteNotif, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
-  const navItems =
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const baseNavItems =
     role === 'director'
       ? [
           { id: 'overview', label: 'Dashboard', ic: '◈' },
@@ -832,24 +843,43 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
           { id: 'ai', label: 'AI', ic: '✦' },
           { id: 'chat', label: 'Chat', ic: '✉' },
         ];
+  const navItems = isSuperAdmin ? [...baseNavItems, { id: 'admin', label: 'Admin Console', ic: '🛡' }] : baseNavItems;
 
   const unseenNotifs = (notifs || []).filter((n: Notif) => !n.seen);
+
+  function selectTab(id: string) {
+    setTab(id);
+    setMobileNavOpen(false);
+  }
 
   return (
     <>
     <div className={'app-shell' + (collapsed ? ' sidebar-collapsed' : '')}>
-      <aside className="sidebar">
+      <button className="mobile-hamburger" onClick={() => setMobileNavOpen(true)} title="Menu">☰</button>
+      {mobileNavOpen && <div className="mobile-drawer-backdrop" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={'sidebar' + (mobileNavOpen ? ' mobile-open' : '')}>
         <div className="brand">
-          <div className="brandmark">D</div>
-          {!collapsed && <span>THE DESK</span>}
+          <div className="brandmark">{isSuperAdmin ? 'A' : 'D'}</div>
+          {!collapsed && <span>{isSuperAdmin ? 'THE DESK · ADMIN' : 'THE DESK'}</span>}
           <button className="sidebar-toggle" onClick={() => setCollapsed((c) => !c)} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
             {collapsed ? '»' : '«'}
           </button>
+          <button className="mobile-drawer-close" onClick={() => setMobileNavOpen(false)}>✕</button>
         </div>
+
+        {isSuperAdmin && !collapsed && (
+          <div className="acting-role-switch">
+            <span className="field-label" style={{ marginBottom: 6 }}>Acting as</span>
+            <div className="acting-role-toggle">
+              <button className={role === 'director' ? 'active' : ''} onClick={() => switchActingRole('director')}>Director</button>
+              <button className={role === 'ea' ? 'active' : ''} onClick={() => switchActingRole('ea')}>EA</button>
+            </div>
+          </div>
+        )}
 
         <nav className="nav">
           {navItems.map((item: any) => (
-            <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)} title={collapsed ? item.label : undefined}>
+            <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => selectTab(item.id)} title={collapsed ? item.label : undefined}>
               <span>{item.ic}</span>{!collapsed && <span>{item.label}</span>}
               {item.badge && unread > 0 && <span className="badge">{unread}</span>}
             </button>
@@ -863,7 +893,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {notifPermission !== 'granted' && (
               <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={requestNotifPermission}>🔔 Enable notifications</button>
             )}
-            <span className="live"><i /> {role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
+            <span className="live"><i /> {isSuperAdmin ? 'Super Admin' : role === 'director' ? 'Managing Director' : 'Executive Assistant'} · {profile.name || profile.id.slice(0, 6)}</span>
             <button className="soft-btn" style={{ padding: '9px 13px', fontSize: 11 }} onClick={onLogout}>Sign out</button>
           </div>
         )}
@@ -910,6 +940,7 @@ function Shell({ role, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, 
             {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
             {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} toast={toast} />}
             {tab === 'costimprovement' && <CostImprovementPage role={role} costTickets={costTickets} addCostTicket={addCostTicket} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} toast={toast} />}
+            {tab === 'admin' && isSuperAdmin && <AdminConsoleContent profile={profile} toast={toast} />}
           </section>
         </main>
       </div>
@@ -1547,6 +1578,23 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRol
     reload.loadTasks();
     toast(when ? 'Reminder set for this task.' : 'Reminder removed.');
   }
+  async function editTask(id: string, fields: { title: string; description: string; category: Category; priority: string; due_date: string | null }) {
+    const { error } = await supabase.from('tasks').update(fields).eq('id', id);
+    if (error) { toast('⚠️ Could not save changes: ' + error.message); return; }
+    await supabase.from('task_updates').insert({ task_id: id, by_role: role, text: 'Edited task details' });
+    await notifyRole(otherRole, `"${fields.title}" was edited`, id);
+    toast('Task updated.');
+    reload.loadTasks();
+  }
+  async function deleteTaskPermanently(id: string) {
+    const t = tasks.find((x: Task) => x.id === id);
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) { toast('⚠️ Could not delete: ' + error.message); return; }
+    if (t) await notifyRole(otherRole, `"${t.title}" was deleted`, null);
+    toast('Task deleted.');
+    if (focus?.kind === 'single' && focus.id === id) setFocus(null);
+    reload.loadTasks();
+  }
 
   function exportCSV() {
     const rows: string[][] = [['Timestamp', 'Task', 'Category', 'Priority', 'Event', 'Details']];
@@ -1591,7 +1639,7 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRol
         <p className="sub">Everything about this card — nothing hidden.</p>
         <button className="soft-btn" style={{ marginBottom: 18 }} onClick={() => setFocus(null)}>← Back to full pipeline</button>
         {t ? (
-          <TaskDetail t={t} role={role} tUpdates={tUpdates} moveStage={moveStage} postUpdate={postUpdate} setReminder={setReminder} />
+          <TaskDetail t={t} role={role} tUpdates={tUpdates} moveStage={moveStage} postUpdate={postUpdate} setReminder={setReminder} editTask={editTask} deleteTaskPermanently={deleteTaskPermanently} />
         ) : <div className="empty">That task isn't around anymore.</div>}
       </>
     );
@@ -1663,6 +1711,8 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRol
                     moveStage={moveStage}
                     postUpdate={postUpdate}
                     setReminder={setReminder}
+                    editTask={editTask}
+                    deleteTaskPermanently={deleteTaskPermanently}
                   />
                 ))}
               </div>
@@ -1677,9 +1727,16 @@ function Tasks({ role, tasks, updates, reload, toast, focus, setFocus, notifyRol
 // =========================================================
 // TaskDetail — the full, nothing-hidden view of a single task
 // =========================================================
-function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder }: { t: Task; role: Role; tUpdates: TaskUpdate[]; moveStage: any; postUpdate: any; setReminder: any }) {
+function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder, editTask, deleteTaskPermanently }: { t: Task; role: Role; tUpdates: TaskUpdate[]; moveStage: any; postUpdate: any; setReminder: any; editTask: any; deleteTaskPermanently: any }) {
   const [val, setVal] = useState('');
   const [remVal, setRemVal] = useState(t.reminder_at ? t.reminder_at.slice(0, 16) : '');
+  const [showEdit, setShowEdit] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editTitle, setEditTitle] = useState(t.title);
+  const [editDesc, setEditDesc] = useState(t.description || '');
+  const [editCategory, setEditCategory] = useState<Category>(t.category || 'Tasks');
+  const [editPriority, setEditPriority] = useState(t.priority);
+  const [editDue, setEditDue] = useState(t.due_date || '');
   const idx = STAGES.indexOf(t.status);
   const canGoBack = idx > 0;
   const canAdvance = idx < STAGES.length - 1;
@@ -1687,16 +1744,67 @@ function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder }: {
   const today = new Date().toISOString().slice(0, 10);
   const daysOverdue = t.due_date && t.due_date < today && t.status !== 'completed' ? Math.floor((Date.now() - new Date(t.due_date).getTime()) / 86400000) : 0;
 
+  function saveEdit() {
+    if (!editTitle.trim()) return;
+    editTask(t.id, { title: editTitle.trim(), description: editDesc.trim(), category: editCategory, priority: editPriority, due_date: editDue || null });
+    setShowEdit(false);
+  }
+
   return (
     <div className="paper card-block" style={{ maxWidth: 640 }}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="pill cat-pill">{t.category || 'Tasks'}</span>
-        <span className={'pill prio-' + t.priority}>{t.priority}</span>
-        <span className={'pill status-' + t.status}>{STAGE_LABELS[t.status]}</span>
-        {daysOverdue > 0 && <span className="pill" style={{ color: '#ff2d55', borderColor: 'rgba(255,45,85,.4)', fontWeight: 800 }}>{daysOverdue}d overdue</span>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="pill cat-pill">{t.category || 'Tasks'}</span>
+          <span className={'pill prio-' + t.priority}>{t.priority}</span>
+          <span className={'pill status-' + t.status}>{STAGE_LABELS[t.status]}</span>
+          {daysOverdue > 0 && <span className="pill" style={{ color: '#ff2d55', borderColor: 'rgba(255,45,85,.4)', fontWeight: 800 }}>{daysOverdue}d overdue</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {!showEdit && <button className="tiny-btn" onClick={() => setShowEdit(true)}>✏️ Edit</button>}
+          {confirmDelete ? (
+            <>
+              <button className="danger-btn" style={{ padding: '6px 10px', fontSize: 10 }} onClick={() => deleteTaskPermanently(t.id)}>Confirm delete</button>
+              <button className="tiny-btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+            </>
+          ) : (
+            <button className="tiny-btn" onClick={() => setConfirmDelete(true)}>🗑️ Delete</button>
+          )}
+        </div>
       </div>
-      <h3 style={{ fontSize: 24, marginBottom: 10 }}>{t.title}</h3>
-      <p style={{ fontSize: 13.5, color: '#4a545c', lineHeight: 1.6, marginBottom: 16 }}>{t.description || 'No description.'}</p>
+
+      {showEdit ? (
+        <div style={{ marginBottom: 18 }}>
+          <label className="field-label">Title</label>
+          <input className="input" style={{ marginBottom: 10, background: '#fff', color: '#111923', borderColor: 'rgba(12,18,24,.15)' }} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+          <label className="field-label">Description</label>
+          <textarea className="textarea" style={{ marginBottom: 10, background: '#fff', color: '#111923', borderColor: 'rgba(12,18,24,.15)', minHeight: 70 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
+          <div className="form-grid" style={{ marginBottom: 10 }}>
+            <div>
+              <label className="field-label">Category</label>
+              <select className="select" style={{ background: '#fff', color: '#111923', borderColor: 'rgba(12,18,24,.15)' }} value={editCategory} onChange={(e) => setEditCategory(e.target.value as Category)}>
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Priority</label>
+              <select className="select" style={{ background: '#fff', color: '#111923', borderColor: 'rgba(12,18,24,.15)' }} value={editPriority} onChange={(e) => setEditPriority(e.target.value as any)}>
+                <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option>
+              </select>
+            </div>
+          </div>
+          <label className="field-label">Due date</label>
+          <input className="input" type="date" style={{ marginBottom: 14, background: '#fff', color: '#111923', borderColor: 'rgba(12,18,24,.15)' }} value={editDue} onChange={(e) => setEditDue(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={saveEdit}>Save changes</button>
+            <button className="tiny-btn" onClick={() => setShowEdit(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <h3 style={{ fontSize: 24, marginBottom: 10 }}>{t.title}</h3>
+          <p style={{ fontSize: 13.5, color: '#4a545c', lineHeight: 1.6, marginBottom: 16 }}>{t.description || 'No description.'}</p>
+        </>
+      )}
 
       <div className="form-grid" style={{ marginBottom: 18 }}>
         <div>
@@ -1740,11 +1848,18 @@ function TaskDetail({ t, role, tUpdates, moveStage, postUpdate, setReminder }: {
   );
 }
 
-function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder }: any) {
+function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder, editTask, deleteTaskPermanently }: any) {
   const [val, setVal] = useState('');
   const [showUpdates, setShowUpdates] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [remVal, setRemVal] = useState(t.reminder_at ? t.reminder_at.slice(0, 16) : '');
+  const [editTitle, setEditTitle] = useState(t.title);
+  const [editDesc, setEditDesc] = useState(t.description || '');
+  const [editCategory, setEditCategory] = useState<Category>(t.category || 'Tasks');
+  const [editPriority, setEditPriority] = useState(t.priority);
+  const [editDue, setEditDue] = useState(t.due_date || '');
   const idx = STAGES.indexOf(stage);
   const canGoBack = idx > 0;
   const canAdvance = idx < STAGES.length - 1;
@@ -1753,6 +1868,12 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
   const daysOverdue = t.due_date && t.due_date < todayStr && t.status !== 'completed'
     ? Math.floor((Date.now() - new Date(t.due_date).getTime()) / 86400000)
     : 0;
+
+  function saveEdit() {
+    if (!editTitle.trim()) return;
+    editTask(t.id, { title: editTitle.trim(), description: editDesc.trim(), category: editCategory, priority: editPriority, due_date: editDue || null });
+    setShowEdit(false);
+  }
 
   return (
     <div
@@ -1770,24 +1891,58 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder 
           </span>
         )}
       </div>
-      <strong className="w-title">{t.title}</strong>
-      <div className="w-desc">{t.description}</div>
-      <div className="w-meta" style={{ marginTop: 8 }}>
-        <span className="w-due">{t.due_date ? 'DUE ' + t.due_date : 'NO DUE DATE'}</span>
-      </div>
 
-      {t.reminder_at && (
+      {showEdit ? (
+        <div onMouseDown={(e) => e.stopPropagation()}>
+          <input className="reminder-input" style={{ marginBottom: 8, fontWeight: 700 }} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Title" />
+          <textarea className="reminder-input" style={{ marginBottom: 8, minHeight: 60 }} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            <select className="reminder-input" style={{ flex: 1 }} value={editCategory} onChange={(e) => setEditCategory(e.target.value as Category)}>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className="reminder-input" style={{ flex: 1 }} value={editPriority} onChange={(e) => setEditPriority(e.target.value as any)}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option>
+            </select>
+          </div>
+          <input className="reminder-input" style={{ marginBottom: 10 }} type="date" value={editDue} onChange={(e) => setEditDue(e.target.value)} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={saveEdit}>Save</button>
+            <button className="tiny-btn" onClick={() => setShowEdit(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <strong className="w-title">{t.title}</strong>
+          <div className="w-desc">{t.description}</div>
+          <div className="w-meta" style={{ marginTop: 8 }}>
+            <span className="w-due">{t.due_date ? 'DUE ' + t.due_date : 'NO DUE DATE'}</span>
+          </div>
+        </>
+      )}
+
+      {t.reminder_at && !showEdit && (
         <div className="reminder-badge" onMouseDown={(e) => e.stopPropagation()} onClick={() => setShowReminder((s) => !s)}>
           ⏰ {new Date(t.reminder_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </div>
       )}
 
-      <div className="actions-row" style={{ marginTop: 10 }} onMouseDown={(e) => e.stopPropagation()}>
-        {canGoBack && <button className="tiny-btn" onClick={() => moveStage(t.id, -1)}>← Back</button>}
-        {canAdvance && <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => moveStage(t.id, 1)}>Advance →</button>}
-        <button className="tiny-btn" onClick={() => setShowReminder((s) => !s)}>⏰ Remind</button>
-        <button className="tiny-btn" onClick={() => setShowUpdates((s) => !s)}>💬 {updates.length}</button>
-      </div>
+      {!showEdit && (
+        <div className="actions-row" style={{ marginTop: 10 }} onMouseDown={(e) => e.stopPropagation()}>
+          {canGoBack && <button className="tiny-btn" onClick={() => moveStage(t.id, -1)}>← Back</button>}
+          {canAdvance && <button className="tiny-btn" style={{ background: '#0e151d', color: '#fff' }} onClick={() => moveStage(t.id, 1)}>Advance →</button>}
+          <button className="tiny-btn" onClick={() => setShowReminder((s) => !s)}>⏰ Remind</button>
+          <button className="tiny-btn" onClick={() => setShowUpdates((s) => !s)}>💬 {updates.length}</button>
+          <button className="tiny-btn" onClick={() => setShowEdit(true)}>✏️ Edit</button>
+          {confirmDelete ? (
+            <>
+              <button className="danger-btn" style={{ padding: '6px 10px', fontSize: 10 }} onClick={() => deleteTaskPermanently(t.id)}>Confirm delete</button>
+              <button className="tiny-btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+            </>
+          ) : (
+            <button className="tiny-btn" onClick={() => setConfirmDelete(true)}>🗑️</button>
+          )}
+        </div>
+      )}
 
       {showReminder && (
         <div className="reminder-form" onMouseDown={(e) => e.stopPropagation()}>

@@ -88,6 +88,15 @@ button{cursor:pointer}
 /* ---- shell: left sidebar layout ---- */
 .app-shell{display:flex;min-height:100vh}
 .sidebar{width:246px;flex-shrink:0;background:rgba(5,12,18,.6);border-right:1px solid var(--line);backdrop-filter:blur(24px);display:flex;flex-direction:column;padding:22px 16px;position:sticky;top:0;height:100vh;overflow-y:auto;transition:width .2s ease,padding .2s ease}
+
+.acting-role-switch{margin-bottom:16px}
+.acting-role-toggle{display:flex;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:11px;padding:3px;gap:3px}
+.acting-role-toggle button{flex:1;padding:8px 6px;border-radius:8px;font-size:11px;font-weight:800;color:var(--text-faint);background:transparent}
+.acting-role-toggle button.active{background:var(--acid);color:#3a0d1a}
+
+.mobile-hamburger{display:none}
+.mobile-drawer-backdrop{display:none}
+.mobile-drawer-close{display:none}
 .app-shell.sidebar-collapsed .sidebar{width:72px;padding:22px 10px}
 .app-shell.sidebar-collapsed .nav button{justify-content:center}
 .brand{display:flex;align-items:center;gap:12px;font-size:12px;font-weight:900;letter-spacing:.14em;white-space:nowrap;padding:0 6px 22px;border-bottom:1px solid var(--line);margin-bottom:18px;position:relative}
@@ -322,28 +331,45 @@ button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:1150px){.grid-2,.form-grid{grid-template-columns:1fr}.kpi-strip{grid-template-columns:repeat(2,1fr)}.ring-strip{grid-template-columns:repeat(3,1fr)}.category-strip{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){
   .app-shell{flex-direction:column}
-  .sidebar{width:100%;height:auto;position:relative;flex-direction:row;flex-wrap:nowrap;align-items:center;padding:10px 12px;gap:10px}
-  .sidebar .brand{border-bottom:none;margin-bottom:0;padding-bottom:0;flex:0 0 auto}
+
+  .mobile-hamburger{
+    display:flex;align-items:center;justify-content:center;
+    position:fixed;top:14px;left:14px;z-index:160;
+    width:42px;height:42px;border-radius:12px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--text-main);
+    font-size:18px;box-shadow:0 10px 24px rgba(0,0,0,.3);
+  }
+  .mobile-drawer-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:145;backdrop-filter:blur(2px)}
+  .mobile-drawer-close{display:flex;align-items:center;justify-content:center;position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,.08);border:1px solid var(--line);color:var(--text-main);font-size:14px}
+
+  .sidebar{
+    position:fixed;top:0;left:0;height:100dvh;width:82vw;max-width:320px;
+    transform:translateX(-100%);transition:transform .25s ease;
+    z-index:150;padding:20px 18px;flex-direction:column;
+    box-shadow:0 0 40px rgba(0,0,0,.4);
+  }
+  .sidebar.mobile-open{transform:translateX(0)}
+  .sidebar .brand{position:relative;padding-right:36px}
   .sidebar-toggle{display:none}
-  .nav{flex-direction:row;flex-wrap:nowrap;flex:1;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:6px;min-width:0}
-  .nav::-webkit-scrollbar{display:none}
-  .nav button{flex:0 0 auto;padding:9px 12px;font-size:10.5px}
-  .sidebar-foot{flex-direction:row;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:8px;padding-top:10px;width:100%;gap:8px}
-  .main-content{padding-bottom:0}
+  .nav{flex-direction:column;overflow-x:visible}
+  .nav button{width:100%}
+  .nav button span:last-child{display:inline}
+  .sidebar-foot{width:100%}
+
+  .main-content{padding-top:64px}
   .section{padding:20px 14px 50px}
   .capture{grid-template-columns:1fr}
   .ring-strip{grid-template-columns:repeat(2,1fr)}
   .category-strip{grid-template-columns:1fr}
   .admin-grid{grid-template-columns:1fr}
   .kpi-strip{grid-template-columns:1fr}
-  .bell-fab{top:14px;right:14px;width:38px;height:38px;font-size:15px}
-  .bell-panel-fixed{top:56px;right:10px;width:calc(100vw - 20px);max-width:320px}
-  .chat-shell{height:70vh}
+  .bell-fab{top:14px;right:14px;width:42px;height:42px;font-size:16px}
+  .bell-panel-fixed{top:64px;right:10px;width:calc(100vw - 20px);max-width:320px}
+  .chat-shell{height:65vh}
   .chat-compose{padding:10px;gap:6px}
   .mic-btn{width:38px !important;height:38px !important;font-size:14px}
   .work{padding:12px 14px}
   .leverage-row{flex-direction:column;align-items:flex-start;gap:8px}
-  .admin-top{padding:0 14px;flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px;gap:8px}
 }
 @media(max-width:420px){
   .ring-strip{grid-template-columns:1fr}
