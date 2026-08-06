@@ -455,6 +455,14 @@ export default function Home() {
     if (error) setAuthError(error.message);
     setLoginBusy(false);
   }
+  async function loginWithGoogle() {
+    setAuthError('');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined },
+    });
+    if (error) setAuthError(error.message);
+  }
   async function logout() {
     await supabase.auth.signOut();
     setProfile(null);
@@ -462,7 +470,7 @@ export default function Home() {
 
   if (loading) return <div className="center-loading">Loading The Desk…</div>;
   if (!session || !profile) {
-    return <LoginGate onLogin={login} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
+    return <LoginGate onLogin={login} onLoginGoogle={loginWithGoogle} error={authError} busy={loginBusy} needsProfile={!!session && !profile} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
   if (profile.role === 'admin') {
@@ -561,7 +569,7 @@ function ReminderAlertCard({ alert, onView, onDismiss, onSnooze }: any) {
   );
 }
 
-function LoginGate({ onLogin, error, busy, needsProfile, onLogout, theme, toggleTheme }: any) {
+function LoginGate({ onLogin, onLoginGoogle, error, busy, needsProfile, onLogout, theme, toggleTheme }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   return (
@@ -580,7 +588,12 @@ function LoginGate({ onLogin, error, busy, needsProfile, onLogout, theme, toggle
           </>
         ) : (
           <>
-            <div style={{ marginBottom: 12 }}>
+            <button className="google-btn" onClick={onLoginGoogle} style={{ marginBottom: 18 }}>
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.71v2.26h2.92a8.8 8.8 0 0 0 2.68-6.61z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.19l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.95v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.71a5.4 5.4 0 0 1 0-3.42V4.96H.95a9 9 0 0 0 0 8.08l3.02-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .95 4.96l3.02 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+              Sign in with Google
+            </button>
+            <div className="or-divider"><span>or continue with email</span></div>
+            <div style={{ marginBottom: 12, marginTop: 18 }}>
               <label className="field-label">Email</label>
               <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
             </div>
@@ -1898,11 +1911,54 @@ function useSpeechToText(onResult: (text: string) => void) {
   return { listening, toggle, supported };
 }
 
+// =========================================================
+// Real voice-note recording (not speech-to-text) — records
+// actual audio and hands back a playable blob, like a
+// WhatsApp voice message.
+// =========================================================
+function useVoiceRecorder() {
+  const [recording, setRecording] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    setSupported(typeof window !== 'undefined' && !!navigator.mediaDevices && !!(window as any).MediaRecorder);
+  }, []);
+
+  async function start() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mr = new MediaRecorder(stream);
+    chunksRef.current = [];
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mediaRecorderRef.current = mr;
+    mr.start();
+    setRecording(true);
+  }
+
+  function stop(): Promise<Blob> {
+    return new Promise((resolve) => {
+      const mr = mediaRecorderRef.current;
+      if (!mr) { resolve(new Blob()); return; }
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        mr.stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        resolve(blob);
+      };
+      mr.stop();
+    });
+  }
+
+  return { recording, supported, start, stop };
+}
+
 function AIPortal({ role }: any) {
-  const [history, setHistory] = useState<{ role: string; text: string }[]>([]);
+  const [history, setHistory] = useState<{ role: string; text: string; audioUrl?: string }[]>([]);
   const [input, setInput] = useState('');
+  const [sendingVoice, setSendingVoice] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
-  const speech = useSpeechToText((text) => setInput((v) => (v + ' ' + text).trim()));
+  const voice = useVoiceRecorder();
 
   async function send() {
     const text = input.trim();
@@ -1921,6 +1977,38 @@ function AIPortal({ role }: any) {
     }
   }
 
+  async function toggleVoice() {
+    if (!voice.supported) { alert('Voice recording is not supported in this browser.'); return; }
+    if (voice.recording) {
+      const blob = await voice.stop();
+      setSendingVoice(true);
+      const audioUrl = URL.createObjectURL(blob);
+      const next = [...history, { role: 'user', text: '🎤 Voice message', audioUrl }];
+      setHistory(next);
+      setHistory((h) => [...h, { role: 'assistant', text: '…listening' }]);
+      try {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(blob);
+        });
+        const resp = await fetch('/api/ai-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role, history: next.slice(0, -1), audioBase64: base64, audioMimeType: 'audio/webm' }),
+        });
+        const data = await resp.json();
+        const replyText = data.reply || (data.error ? `⚠️ ${data.error}` : 'Sorry, no reply.');
+        setHistory((h) => [...h.slice(0, -1), { role: 'assistant', text: replyText }]);
+      } catch {
+        setHistory((h) => [...h.slice(0, -1), { role: 'assistant', text: 'Sorry, I could not reach the AI just now.' }]);
+      }
+      setSendingVoice(false);
+    } else {
+      try { await voice.start(); } catch { alert('Could not access your microphone.'); }
+    }
+  }
+
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [history]);
 
   return (
@@ -1931,11 +2019,24 @@ function AIPortal({ role }: any) {
       <div className="glass chat-shell" style={{ marginTop: 20 }}>
         <div className="chat-list" ref={logRef}>
           {!history.length && <div className="empty">Ask something to get started.</div>}
-          {history.map((m, i) => <div key={i} className={'bubble ' + (m.role === 'user' ? 'user' : 'ai')}>{m.text}</div>)}
+          {history.map((m, i) => (
+            <div key={i} className={'bubble ' + (m.role === 'user' ? 'user' : 'ai')}>
+              {m.text}
+              {m.audioUrl && <audio controls src={m.audioUrl} className="voice-note-player" />}
+            </div>
+          ))}
         </div>
         <div className="chat-compose">
-          {speech.supported && (
-            <button className={'mic-btn' + (speech.listening ? ' live' : '')} onClick={speech.toggle} title="Speak" style={{ width: 44, height: 44 }}>🎙️</button>
+          {voice.supported && (
+            <button
+              className={'mic-btn' + (voice.recording ? ' live' : '')}
+              onClick={toggleVoice}
+              disabled={sendingVoice}
+              title={voice.recording ? 'Stop and send voice note' : 'Record a voice note'}
+              style={{ width: 44, height: 44 }}
+            >
+              {voice.recording ? '⏹️' : '🎙️'}
+            </button>
           )}
           <input className="input" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the AI anything..." onKeyDown={(e) => e.key === 'Enter' && send()} />
           <button className="acid-btn" onClick={send}>Send</button>
@@ -1951,9 +2052,10 @@ function AIPortal({ role }: any) {
 function Chat({ role, chat, reload }: any) {
   const [input, setInput] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [sendingVoice, setSendingVoice] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const speech = useSpeechToText((text) => setInput((v) => (v + ' ' + text).trim()));
+  const voice = useVoiceRecorder();
 
   async function send() {
     const text = input.trim();
@@ -1987,10 +2089,35 @@ function Chat({ role, chat, reload }: any) {
     reload.loadChat();
   }
 
+  async function toggleVoice() {
+    if (!voice.supported) { alert('Voice recording is not supported in this browser.'); return; }
+    if (voice.recording) {
+      const blob = await voice.stop();
+      setSendingVoice(true);
+      const path = `voice-notes/${Date.now()}-note.webm`;
+      const { error: upErr } = await supabase.storage.from('attachments').upload(path, blob, { contentType: 'audio/webm' });
+      setSendingVoice(false);
+      if (upErr) { alert('Could not send voice note: ' + upErr.message); return; }
+      const { data: pub } = supabase.storage.from('attachments').getPublicUrl(path);
+      await supabase.from('chat_messages').insert({
+        from_role: role,
+        text: '🎤 Voice note',
+        attachment_url: pub.publicUrl,
+        attachment_name: 'voice-note.webm',
+      });
+      reload.loadChat();
+    } else {
+      try { await voice.start(); } catch { alert('Could not access your microphone.'); }
+    }
+  }
+
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [chat]);
 
   function isImage(name?: string | null) {
     return !!name && /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
+  }
+  function isAudio(name?: string | null) {
+    return !!name && /\.(webm|mp3|wav|m4a|ogg)$/i.test(name);
   }
 
   return (
@@ -2003,9 +2130,11 @@ function Chat({ role, chat, reload }: any) {
           {!chat.length && <div className="empty">No messages yet — say hello.</div>}
           {chat.map((m: ChatMessage) => (
             <div key={m.id} className={'bubble ' + (m.from_role === role ? 'user' : 'ai')}>
-              {m.text}
+              {isAudio(m.attachment_name) ? null : m.text}
               {m.attachment_url && (
-                isImage(m.attachment_name) ? (
+                isAudio(m.attachment_name) ? (
+                  <audio controls src={m.attachment_url} className="voice-note-player" />
+                ) : isImage(m.attachment_name) ? (
                   <a href={m.attachment_url} target="_blank" rel="noreferrer"><img src={m.attachment_url} alt={m.attachment_name || 'attachment'} className="chat-attachment-img" /></a>
                 ) : (
                   <a href={m.attachment_url} target="_blank" rel="noreferrer" className="chat-attachment-file">📎 {m.attachment_name || 'Download attachment'}</a>
@@ -2016,8 +2145,16 @@ function Chat({ role, chat, reload }: any) {
           ))}
         </div>
         <div className="chat-compose">
-          {speech.supported && (
-            <button className={'mic-btn' + (speech.listening ? ' live' : '')} onClick={speech.toggle} title="Speak" style={{ width: 44, height: 44 }}>🎙️</button>
+          {voice.supported && (
+            <button
+              className={'mic-btn' + (voice.recording ? ' live' : '')}
+              onClick={toggleVoice}
+              disabled={sendingVoice}
+              title={voice.recording ? 'Stop and send voice note' : 'Record a voice note'}
+              style={{ width: 44, height: 44 }}
+            >
+              {voice.recording ? '⏹️' : '🎙️'}
+            </button>
           )}
           <button className="mic-btn" style={{ width: 44, height: 44 }} onClick={() => fileRef.current?.click()} title="Attach a file" disabled={uploading}>
             {uploading ? '…' : '📎'}

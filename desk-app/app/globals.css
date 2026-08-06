@@ -76,6 +76,10 @@ button{cursor:pointer}
 .gate .welcome-card .input::placeholder{color:#5b6b82}
 .gate .pill{border-color:rgba(255,255,255,.14)}
 .gate .theme-toggle{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#dce4ea}
+.google-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 18px;border-radius:13px;border:1px solid rgba(255,255,255,.16);background:#fff;color:#1a1a1a;font-weight:700;font-size:13px}
+.google-btn:hover{background:#f2f2f2}
+.or-divider{display:flex;align-items:center;gap:12px;color:#5b6b82;font-size:11px;margin-top:4px}
+.or-divider::before,.or-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.12)}
 .field-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#78838d;margin-bottom:6px;display:block}
 .input,.select,.textarea{width:100%;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.055);color:#fff;border-radius:14px;padding:11px 13px;outline:none}
 .input:focus,.select:focus,.textarea:focus{border-color:var(--acid)}
@@ -305,6 +309,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .chat-compose{padding:14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px}
 .chat-compose .input{flex:1}
 .chat-attachment-img{display:block;max-width:220px;border-radius:12px;margin-top:8px}
+.voice-note-player{display:block;width:220px;max-width:100%;height:36px;margin-top:4px}
+.bubble.user .voice-note-player{filter:invert(1) hue-rotate(180deg)}
 .chat-attachment-file{display:inline-block;margin-top:8px;font-size:11.5px;color:var(--acid);text-decoration:underline}
 
 .toast-stack{position:fixed;right:18px;bottom:18px;z-index:400;display:grid;gap:8px}
@@ -314,4 +320,32 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .center-loading{min-height:100vh;display:flex;align-items:center;justify-content:center;color:#8fa0b8;font-size:13px}
 
 @media(max-width:1150px){.grid-2,.form-grid{grid-template-columns:1fr}.kpi-strip{grid-template-columns:repeat(2,1fr)}.ring-strip{grid-template-columns:repeat(3,1fr)}.category-strip{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:760px){.app-shell{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;flex-direction:row;flex-wrap:wrap;align-items:center;padding:14px 16px}.sidebar .brand{border-bottom:none;margin-bottom:0;padding-bottom:0;flex:1}.nav{flex-direction:row;flex-wrap:wrap;flex:0}.sidebar-foot{flex-direction:row;border-top:none;margin-top:0;padding-top:0;width:100%}.top-actions{flex-direction:row;flex-wrap:wrap}.section{padding:24px 16px 60px}.capture{grid-template-columns:1fr}.ring-strip{grid-template-columns:repeat(2,1fr)}.category-strip{grid-template-columns:1fr}}
+@media(max-width:760px){
+  .app-shell{flex-direction:column}
+  .sidebar{width:100%;height:auto;position:relative;flex-direction:row;flex-wrap:nowrap;align-items:center;padding:10px 12px;gap:10px}
+  .sidebar .brand{border-bottom:none;margin-bottom:0;padding-bottom:0;flex:0 0 auto}
+  .sidebar-toggle{display:none}
+  .nav{flex-direction:row;flex-wrap:nowrap;flex:1;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:6px;min-width:0}
+  .nav::-webkit-scrollbar{display:none}
+  .nav button{flex:0 0 auto;padding:9px 12px;font-size:10.5px}
+  .sidebar-foot{flex-direction:row;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:8px;padding-top:10px;width:100%;gap:8px}
+  .main-content{padding-bottom:0}
+  .section{padding:20px 14px 50px}
+  .capture{grid-template-columns:1fr}
+  .ring-strip{grid-template-columns:repeat(2,1fr)}
+  .category-strip{grid-template-columns:1fr}
+  .admin-grid{grid-template-columns:1fr}
+  .kpi-strip{grid-template-columns:1fr}
+  .bell-fab{top:14px;right:14px;width:38px;height:38px;font-size:15px}
+  .bell-panel-fixed{top:56px;right:10px;width:calc(100vw - 20px);max-width:320px}
+  .chat-shell{height:70vh}
+  .chat-compose{padding:10px;gap:6px}
+  .mic-btn{width:38px !important;height:38px !important;font-size:14px}
+  .work{padding:12px 14px}
+  .leverage-row{flex-direction:column;align-items:flex-start;gap:8px}
+  .admin-top{padding:0 14px;flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px;gap:8px}
+}
+@media(max-width:420px){
+  .ring-strip{grid-template-columns:1fr}
+  .form-grid{grid-template-columns:1fr}
+}
