@@ -25,7 +25,7 @@ type Task = {
   created_at: string;
 };
 type TaskUpdate = { id: string; task_id: string; by_role: Role; text: string; created_at: string };
-type Reminder = { id: string; owner_role: Role; text: string; freq: 'day' | 'week' | 'month'; created_at: string };
+type Reminder = { id: string; owner_role: Role; text: string; freq: 'day' | 'week' | 'month'; remind_at: string | null; created_at: string };
 type ChatMessage = { id: string; from_role: Role; text: string; created_at: string; attachment_url?: string | null; attachment_name?: string | null };
 type Notif = { id: string; recipient_role: Role; text: string; task_id: string | null; seen: boolean; created_at: string };
 type Profile = { id: string; role: AppRole; name: string };
@@ -90,27 +90,37 @@ export default function Home() {
   }
 
   // audible alarm — three ascending beeps, no external audio file needed
+  // loud, insistent alarm — a rising 3-note siren repeated several times so
+  // it clearly reads as an alarm even from across the room.
   function playAlarm() {
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
       const ctx = new Ctx();
-      const beep = (time: number, freq: number) => {
+      if (ctx.state === 'suspended') ctx.resume();
+      const master = ctx.createGain();
+      master.gain.value = 0.9; // loud
+      master.connect(ctx.destination);
+      const beep = (time: number, freq: number, dur = 0.35) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = 'sine';
+        osc.type = 'square'; // richer/harsher than sine — carries further
         osc.frequency.value = freq;
         gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.exponentialRampToValueAtTime(0.35, time + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.9, time + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + dur);
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(master);
         osc.start(time);
-        osc.stop(time + 0.4);
+        osc.stop(time + dur + 0.05);
       };
       const now = ctx.currentTime;
-      beep(now, 740);
-      beep(now + 0.45, 880);
-      beep(now + 0.9, 1046);
+      // 4 cycles of a rising 3-note pattern ≈ 5 seconds of alarm
+      for (let cycle = 0; cycle < 4; cycle++) {
+        const base = now + cycle * 1.25;
+        beep(base, 880);
+        beep(base + 0.35, 1046);
+        beep(base + 0.7, 1318, 0.45);
+      }
     } catch (e) { /* audio not available, ignore */ }
   }
 
@@ -124,22 +134,45 @@ export default function Home() {
     }
   }
 
-  // prominent on-screen alert that stays until dismissed — for reminders specifically
-  const [reminderAlerts, setReminderAlerts] = useState<{ id: string; title: string; taskId: string }[]>([]);
-  function fireReminderAlert(taskId: string, title: string) {
+  // prominent on-screen alert that stays until dismissed — used for both
+  // task reminders and personal (Reminders tab) reminders.
+  const [reminderAlerts, setReminderAlerts] = useState<
+    { id: string; title: string; kind: 'task' | 'reminder'; refId: string }[]
+  >([]);
+  function fireReminderAlert(kind: 'task' | 'reminder', refId: string, title: string) {
     playAlarm();
     pushNotify('⏰ Reminder', title);
-    setReminderAlerts((a) => [...a, { id: taskId + Date.now(), title, taskId }]);
+    setReminderAlerts((a) => [...a, { id: refId + Date.now(), title, kind, refId }]);
   }
   function dismissReminderAlert(id: string) {
     setReminderAlerts((a) => a.filter((r) => r.id !== id));
   }
-  async function snoozeReminder(alertId: string, taskId: string, minutes: number) {
+  async function snoozeReminder(alertId: string, kind: 'task' | 'reminder', refId: string, minutes: number) {
     const when = new Date(Date.now() + minutes * 60000).toISOString();
-    await supabase.from('tasks').update({ reminder_at: when }).eq('id', taskId);
+    if (kind === 'task') {
+      await supabase.from('tasks').update({ reminder_at: when }).eq('id', refId);
+      loadTasks();
+    } else {
+      await supabase.from('reminders').update({ remind_at: when }).eq('id', refId);
+      loadReminders();
+    }
     dismissReminderAlert(alertId);
     toast(`Snoozed — will remind again in ${minutes} min.`);
-    loadTasks();
+  }
+
+  // one shared helper for every privileged Super Admin action — routes through
+  // the server-side service-role API so it bypasses RLS and always succeeds.
+  async function callAdminApi(op: string, payload: Record<string, any> = {}) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    const resp = await fetch('/api/admin/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op, ...payload, accessToken }),
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || json.error) throw new Error(json.error || 'The request failed.');
+    return json;
   }
 
   function sendTestNotification() {
@@ -447,7 +480,7 @@ export default function Home() {
         const due = new Date(t.reminder_at).getTime();
         if (due <= now && due > now - 5 * 60 * 1000 && !firedReminders.current.has(t.id + t.reminder_at)) {
           firedReminders.current.add(t.id + t.reminder_at);
-          fireReminderAlert(t.id, t.title);
+          fireReminderAlert('task', t.id, t.title);
         }
       });
     };
@@ -456,6 +489,27 @@ export default function Home() {
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, profile]);
+
+  // personal (Reminders tab) reminders: fire the same loud alert when their time arrives
+  const firedPersonalReminders = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!profile) return;
+    const check = () => {
+      const now = Date.now();
+      reminders.forEach((r) => {
+        if (!r.remind_at) return;
+        const due = new Date(r.remind_at).getTime();
+        if (due <= now && due > now - 5 * 60 * 1000 && !firedPersonalReminders.current.has(r.id + r.remind_at)) {
+          firedPersonalReminders.current.add(r.id + r.remind_at);
+          fireReminderAlert('reminder', r.id, r.text);
+        }
+      });
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reminders, profile]);
 
   function markTasksRead() {
     if (actingRole === 'ea') localStorage.setItem('desk_notif_read_ea', String(Date.now()));
@@ -535,7 +589,8 @@ export default function Home() {
         deleteCostTicket={deleteCostTicket}
         profile={profile}
         toast={toast}
-        reload={{ loadTasks, loadReminders, loadChat, loadNotifs }}
+        reload={{ loadTasks, loadReminders, loadChat, loadNotifs, loadAttendance }}
+        callAdminApi={callAdminApi}
         toasts={toasts}
         notifPermission={notifPermission}
         requestNotifPermission={requestNotifPermission}
@@ -548,9 +603,13 @@ export default function Home() {
             <ReminderAlertCard
               key={r.id}
               alert={r}
-              onView={() => { setTab('tasks'); setTaskFocus({ kind: 'single', id: r.taskId }); dismissReminderAlert(r.id); }}
+              onView={() => {
+                if (r.kind === 'task') { setTab('tasks'); setTaskFocus({ kind: 'single', id: r.refId }); }
+                else { setTab('reminders'); }
+                dismissReminderAlert(r.id);
+              }}
               onDismiss={() => dismissReminderAlert(r.id)}
-              onSnooze={(minutes: number) => snoozeReminder(r.id, r.taskId, minutes)}
+              onSnooze={(minutes: number) => snoozeReminder(r.id, r.kind, r.refId, minutes)}
             />
           ))}
         </div>
@@ -582,7 +641,7 @@ function ReminderAlertCard({ alert, onView, onDismiss, onSnooze }: any) {
         )}
       </div>
       <div className="reminder-alert-actions">
-        <button className="acid-btn" onClick={onView}>View task</button>
+        <button className="acid-btn" onClick={onView}>{alert.kind === 'reminder' ? 'View' : 'View task'}</button>
         <button className="soft-btn" onClick={() => setShowSnooze((s) => !s)}>Snooze</button>
         <button className="soft-btn" onClick={onDismiss}>Dismiss</button>
       </div>
@@ -647,7 +706,7 @@ const ADMIN_TABLES = [
   { key: 'notifications', label: 'Notifications', note: 'Bell notification history for both desks.' },
 ];
 
-function AdminConsoleContent({ profile, toast }: any) {
+function AdminConsoleContent({ profile, toast, callAdminApi }: any) {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(true);
@@ -697,20 +756,26 @@ function AdminConsoleContent({ profile, toast }: any) {
 
   async function deleteProfile(id: string) {
     if (id === profile.id) { toast("You can't delete your own account while signed in."); setDeletingProfileId(null); return; }
-    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    try {
+      await callAdminApi('deleteUser', { id });
+      toast('Account fully removed \u2014 both the role and the login are gone.');
+    } catch (e: any) {
+      toast('\u26a0\ufe0f Could not remove: ' + e.message);
+    }
     setDeletingProfileId(null);
-    if (error) { toast('\u26a0\ufe0f Could not remove: ' + error.message); return; }
-    toast('Account removed. (Their login still exists in Supabase Auth \u2014 remove it there too if you want to fully delete it.)');
     loadAll();
   }
 
   async function clearTable(key: string) {
     setBusyKey(key);
-    const { error } = await supabase.from(key).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    try {
+      const res = await callAdminApi('clearTable', { table: key });
+      toast(`Cleared ${res.cleared ?? 'all'} row${res.cleared === 1 ? '' : 's'} in "${key}".`);
+    } catch (e: any) {
+      toast('\u26a0\ufe0f Failed to clear: ' + e.message);
+    }
     setBusyKey(null);
     setConfirmKey(null);
-    if (error) { toast('\u26a0\ufe0f Failed to clear: ' + error.message); return; }
-    toast(`Cleared all rows in "${key}".`);
     loadAll();
   }
 
@@ -824,7 +889,7 @@ function AdminConsoleContent({ profile, toast }: any) {
 // =========================================================
 // App shell
 // =========================================================
-function Shell({ role, isSuperAdmin, switchActingRole, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, deleteNotif, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme }: any) {
+function Shell({ role, isSuperAdmin, switchActingRole, tab, setTab, goToTasks, taskFocus, setTaskFocus, unread, onLogout, tasks, updates, reminders, chat, notifs, markNotifSeen, deleteNotif, markAllNotifsSeen, notifyRole, attendance, punchIn, punchOut, wishlist, addWishlistItem, toggleWishlistItem, deleteWishlistItem, expenses, addExpense, deleteExpense, costTickets, addCostTicket, addTicketOption, selectFinalVendor, deleteCostTicket, profile, toast, reload, toasts, notifPermission, requestNotifPermission, theme, toggleTheme, callAdminApi }: any) {
   const [collapsed, setCollapsed] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -944,14 +1009,14 @@ function Shell({ role, isSuperAdmin, switchActingRole, tab, setTab, goToTasks, t
             {tab === 'overview' && <Dashboard role={role} tasks={tasks} updates={updates} setTab={setTab} goToTasks={goToTasks} unread={unread} expenses={expenses} costTickets={costTickets} />}
             {tab === 'newtask' && <NewTask role={role} toast={toast} reload={reload} notifyRole={notifyRole} />}
             {tab === 'tasks' && <Tasks role={role} tasks={tasks} updates={updates} reload={reload} toast={toast} focus={taskFocus} setFocus={setTaskFocus} notifyRole={notifyRole} />}
-            {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} />}
+            {tab === 'reminders' && <Reminders role={role} reminders={reminders} reload={reload} toast={toast} />}
             {tab === 'ai' && <AIPortal role={role} />}
             {tab === 'chat' && <Chat role={role} chat={chat} reload={reload} />}
-            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} />}
+            {tab === 'attendance' && <Attendance role={role} attendance={attendance} punchIn={punchIn} punchOut={punchOut} profile={profile} isSuperAdmin={isSuperAdmin} callAdminApi={callAdminApi} reload={reload} toast={toast} />}
             {tab === 'wishlist' && <Wishlist role={role} wishlist={wishlist} addWishlistItem={addWishlistItem} toggleWishlistItem={toggleWishlistItem} deleteWishlistItem={deleteWishlistItem} />}
             {tab === 'expense' && <ExpensePage role={role} profile={profile} expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} toast={toast} />}
             {tab === 'costimprovement' && <CostImprovementPage role={role} costTickets={costTickets} addCostTicket={addCostTicket} addTicketOption={addTicketOption} selectFinalVendor={selectFinalVendor} deleteCostTicket={deleteCostTicket} toast={toast} />}
-            {tab === 'admin' && isSuperAdmin && <AdminConsoleContent profile={profile} toast={toast} />}
+            {tab === 'admin' && isSuperAdmin && <AdminConsoleContent profile={profile} toast={toast} callAdminApi={callAdminApi} />}
           </section>
         </main>
       </div>
@@ -1995,14 +2060,18 @@ function TaskCard({ t, role, stage, updates, moveStage, postUpdate, setReminder,
 // =========================================================
 // Reminders
 // =========================================================
-function Reminders({ role, reminders, reload }: any) {
+function Reminders({ role, reminders, reload, toast }: any) {
   const [text, setText] = useState('');
   const [freq, setFreq] = useState<'day' | 'week' | 'month'>('day');
+  const [when, setWhen] = useState('');
 
   async function add() {
     if (!text.trim()) return;
-    await supabase.from('reminders').insert({ owner_role: role, text, freq });
+    if (!when) { toast('Pick a date and time to be reminded.'); return; }
+    const remind_at = new Date(when).toISOString();
+    await supabase.from('reminders').insert({ owner_role: role, text, freq, remind_at });
     setText('');
+    setWhen('');
     reload.loadReminders();
   }
   async function del(id: string) {
@@ -2010,26 +2079,56 @@ function Reminders({ role, reminders, reload }: any) {
     reload.loadReminders();
   }
 
+  // upcoming (has a future/near time) shown first & sorted by time; the rest grouped by freq
+  const withTime = (reminders as Reminder[]).filter((r) => r.remind_at).slice()
+    .sort((a, b) => new Date(a.remind_at as string).getTime() - new Date(b.remind_at as string).getTime());
+  const noTime = (reminders as Reminder[]).filter((r) => !r.remind_at);
   const groups: any = { day: [], week: [], month: [] };
-  reminders.forEach((r: Reminder) => groups[r.freq]?.push(r));
+  noTime.forEach((r) => groups[r.freq]?.push(r));
   const labels: any = { day: 'Today', week: 'This week', month: 'This month' };
+
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return (
     <>
       <div className="eyebrow">Reminders</div>
       <h2>Keep yourself on track.</h2>
-      <p className="sub">Personal reminders — visible only on your desk.</p>
+      <p className="sub">Personal reminders — visible only on your desk. Set a date &amp; time and you'll get a loud alert you can snooze.</p>
       <div className="glass hero" style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Remind me to..." onKeyDown={(e) => e.key === 'Enter' && add()} />
-          <select className="select" value={freq} onChange={(e) => setFreq(e.target.value as any)} style={{ maxWidth: 150 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <input className="input" style={{ flex: '2 1 220px' }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Remind me to..." onKeyDown={(e) => e.key === 'Enter' && add()} />
+          <input className="input" style={{ flex: '1 1 200px' }} type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} title="When should we remind you?" />
+          <select className="select" value={freq} onChange={(e) => setFreq(e.target.value as any)} style={{ maxWidth: 150 }} title="Bucket">
             <option value="day">Today</option><option value="week">This week</option><option value="month">This month</option>
           </select>
           <button className="acid-btn" style={{ flexShrink: 0 }} onClick={add}>Add</button>
         </div>
+        <p className="sub" style={{ fontSize: 11, marginTop: 10 }}>
+          Keep this app open (any tab) around the reminder time — when it hits, you'll hear an alarm and see an alert with Snooze &amp; Dismiss.
+        </p>
       </div>
       <div className="scroll-box" style={{ marginTop: 20 }}>
         {!reminders.length && <div className="empty">No reminders yet.</div>}
+        {withTime.length > 0 && (
+          <div className="rem-group">
+            <h4>Scheduled</h4>
+            {withTime.map((r) => {
+              const overdue = new Date(r.remind_at as string).getTime() < Date.now();
+              return (
+                <div className="rem-item" key={r.id}>
+                  <span style={{ flex: 1 }}>
+                    {r.text}
+                    <span className="reminder-badge" style={{ marginLeft: 8, display: 'inline-flex', verticalAlign: 'middle', opacity: overdue ? 0.55 : 1 }}>
+                      ⏰ {fmt(r.remind_at as string)}{overdue ? ' · passed' : ''}
+                    </span>
+                  </span>
+                  <button onClick={() => del(r.id)}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {['day', 'week', 'month'].map((f) => groups[f].length ? (
           <div className="rem-group" key={f}>
             <h4>{labels[f]}</h4>
@@ -2341,13 +2440,89 @@ function Chat({ role, chat, reload }: any) {
 // =========================================================
 // Attendance — punch in/out, daily log, monthly totals, CSV report
 // =========================================================
-function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
+
+// convert a stored ISO timestamp <-> the value a <input type="datetime-local"> wants (local time)
+function attToLocalInput(iso: string) {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function attFromLocalInput(val: string) {
+  return new Date(val).toISOString();
+}
+
+// one editable attendance record (Super Admin only)
+function AttendanceEditRow({ rec, onSave, onDelete }: any) {
+  const [pin, setPin] = useState(attToLocalInput(rec.punch_in));
+  const [pout, setPout] = useState(rec.punch_out ? attToLocalInput(rec.punch_out) : '');
+  const [busy, setBusy] = useState(false);
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', padding: '10px 0', borderBottom: '1px solid var(--line, rgba(255,255,255,.08))' }}>
+      <div style={{ minWidth: 90, fontSize: 12, fontWeight: 700 }}>
+        {new Date(rec.punch_in).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+      </div>
+      <label style={{ fontSize: 10, color: 'var(--text-faint)' }}>Punch in
+        <input type="datetime-local" className="reminder-input" style={{ display: 'block' }} value={pin} onChange={(e) => setPin(e.target.value)} />
+      </label>
+      <label style={{ fontSize: 10, color: 'var(--text-faint)' }}>Punch out
+        <input type="datetime-local" className="reminder-input" style={{ display: 'block' }} value={pout} onChange={(e) => setPout(e.target.value)} />
+      </label>
+      <button className="tiny-btn" disabled={busy} onClick={async () => { setBusy(true); await onSave(rec.id, pin, pout); setBusy(false); }}>
+        {busy ? '…' : 'Save'}
+      </button>
+      <button className="tiny-btn" style={{ marginLeft: -4 }} onClick={() => setPout('')} title="Clear the punch-out (mark as still in)">Clear out</button>
+      <button className="danger-btn" style={{ padding: '6px 12px', fontSize: 11 }} onClick={() => onDelete(rec.id)}>Delete</button>
+    </div>
+  );
+}
+
+function Attendance({ role, attendance, punchIn, punchOut, profile, isSuperAdmin, callAdminApi, reload, toast }: any) {
   const isEA = role === 'ea';
   const eaRecords = (attendance || []).filter((a: AttendanceRow) => a.role === 'ea');
   const myOpen = eaRecords.find((a: AttendanceRow) => !a.punch_out);
   const now = Date.now();
   const [monthOffset, setMonthOffset] = useState(0);
   const [generating, setGenerating] = useState(false);
+
+  // ---- Super Admin editing / regularization ----
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [newIn, setNewIn] = useState('');
+  const [newOut, setNewOut] = useState('');
+  const [addingRow, setAddingRow] = useState(false);
+
+  async function adminSaveRecord(id: string, pinLocal: string, poutLocal: string) {
+    try {
+      await callAdminApi('updateAttendance', {
+        id,
+        punch_in: attFromLocalInput(pinLocal),
+        punch_out: poutLocal ? attFromLocalInput(poutLocal) : null,
+      });
+      reload.loadAttendance();
+      toast('Attendance updated.');
+    } catch (e: any) { toast('⚠️ ' + e.message); }
+  }
+  async function adminDeleteRecord(id: string) {
+    try {
+      await callAdminApi('deleteAttendance', { id });
+      reload.loadAttendance();
+      toast('Attendance entry removed.');
+    } catch (e: any) { toast('⚠️ ' + e.message); }
+  }
+  async function adminRegularize() {
+    if (!newIn) { toast('Pick at least a punch-in date & time.'); return; }
+    setAddingRow(true);
+    try {
+      await callAdminApi('insertAttendance', {
+        role: 'ea',
+        punch_in: attFromLocalInput(newIn),
+        punch_out: newOut ? attFromLocalInput(newOut) : null,
+      });
+      reload.loadAttendance();
+      setNewIn(''); setNewOut('');
+      toast('Attendance regularized — entry added.');
+    } catch (e: any) { toast('⚠️ ' + e.message); }
+    setAddingRow(false);
+  }
 
   function fmtHours(ms: number) {
     return Math.max(0, ms / 3600000).toFixed(1) + 'h';
@@ -2576,6 +2751,49 @@ function Attendance({ role, attendance, punchIn, punchOut, profile }: any) {
           </div>
         </div>
       </div>
+
+      {isSuperAdmin && (
+        <div className="glass card-block" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ margin: 0 }}>🛡 Admin — edit &amp; regularize attendance</h3>
+              <p className="sub" style={{ fontSize: 12, marginTop: 4 }}>Change any day's punch in/out, delete a record, or add attendance for a day that was missed.</p>
+            </div>
+            <button className="soft-btn" onClick={() => setShowAdmin((s) => !s)}>{showAdmin ? 'Hide' : 'Open editor'}</button>
+          </div>
+
+          {showAdmin && (
+            <div style={{ marginTop: 18 }}>
+              {/* regularize / add a day */}
+              <div style={{ padding: 16, borderRadius: 12, background: 'var(--surface-2, rgba(255,255,255,.04))', marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Regularize a day (add attendance)</div>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: 10, color: 'var(--text-faint)' }}>Punch in
+                    <input type="datetime-local" className="reminder-input" style={{ display: 'block' }} value={newIn} onChange={(e) => setNewIn(e.target.value)} />
+                  </label>
+                  <label style={{ fontSize: 10, color: 'var(--text-faint)' }}>Punch out (optional)
+                    <input type="datetime-local" className="reminder-input" style={{ display: 'block' }} value={newOut} onChange={(e) => setNewOut(e.target.value)} />
+                  </label>
+                  <button className="acid-btn" disabled={addingRow} onClick={adminRegularize}>{addingRow ? 'Adding…' : 'Add entry'}</button>
+                </div>
+              </div>
+
+              {/* edit existing records */}
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>All records ({eaRecords.length})</div>
+              <div className="scroll-box" style={{ maxHeight: 360 }}>
+                {eaRecords.length
+                  ? eaRecords
+                      .slice()
+                      .sort((a: AttendanceRow, b: AttendanceRow) => new Date(b.punch_in).getTime() - new Date(a.punch_in).getTime())
+                      .map((rec: AttendanceRow) => (
+                        <AttendanceEditRow key={rec.id} rec={rec} onSave={adminSaveRecord} onDelete={adminDeleteRecord} />
+                      ))
+                  : <div className="empty">No attendance records yet.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
